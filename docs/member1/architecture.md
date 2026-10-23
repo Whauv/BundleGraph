@@ -11,8 +11,8 @@ This document records the proposed Member 1 boundaries before new business logic
 | Language and packaging | Python 3.12+ package, setuptools, `src/` layout |
 | Dependencies | Pydantic 2.x; pytest is a test extra |
 | Existing checks | `python -m pytest`; no lint or type-check command is configured |
-| Existing models | `Money`, `Evidence`, `ProductFact`, `Product`, `ConfirmedRequirements` |
-| Existing rule | `assess_interface_capacity` returns compatible, incompatible, or unknown |
+| Existing models | `Money`, `Evidence`, `Product`, `MerchantOffer`, requirements, and fixture contracts |
+| Existing rules | Focused interface capacity helper plus Phase 2 deterministic graph evaluation |
 | Existing API/persistence | None found |
 | Existing shared schemas | None found |
 

@@ -98,7 +98,7 @@ The existing `Evidence` is compatible with the core claim/provenance idea but ne
 | `explanation` | string | User-readable, deterministic explanation |
 | `affected_requirement` | string or null | Constraint implicated by the finding |
 
-The existing `CompatibilityResult` provides the state and explanation but needs this traceable structure before use as a shared contract.
+Phase 2 implements this as a JSON-serializable Member 1 output with `nodes`, `edges`, `findings`, `evidence_references`, and a classification. The existing single-interface capacity check remains available as a focused helper.
 
 ## BundleProposal
 

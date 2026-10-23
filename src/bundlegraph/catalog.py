@@ -49,21 +49,27 @@ MIC_GAMMA = _product("mic-gamma", ProductCategory.MICROPHONE, "Mic Gamma", {
 })
 INTERFACE_ONE = _product("interface-one", ProductCategory.AUDIO_INTERFACE, "Interface One", {
     "microphone_inputs": _spec(1, SpecificationUnit.COUNT, "ev-interface-one-microphone-inputs"),
+    "microphone_input_connector": _spec("xlr", SpecificationUnit.CONNECTOR, "ev-interface-one-microphone-input-connector"),
     "laptop_connector": _spec("usb-c", SpecificationUnit.CONNECTOR, "ev-interface-one-laptop-connector"),
     "headphone_outputs": _spec(1, SpecificationUnit.COUNT, "ev-interface-one-headphone-outputs"),
 })
 INTERFACE_TWO = _product("interface-two", ProductCategory.AUDIO_INTERFACE, "Interface Two", {
     "microphone_inputs": _spec(2, SpecificationUnit.COUNT, "ev-interface-two-microphone-inputs"),
+    "microphone_input_connector": _spec("xlr", SpecificationUnit.CONNECTOR, "ev-interface-two-microphone-input-connector"),
     "laptop_connector": _spec("usb-c", SpecificationUnit.CONNECTOR, "ev-interface-two-laptop-connector"),
     "headphone_outputs": _spec(2, SpecificationUnit.COUNT, "ev-interface-two-headphone-outputs"),
     "phantom_power": _spec(True, SpecificationUnit.BOOLEAN, "ev-interface-two-phantom-power"),
 })
 INTERFACE_UNKNOWN_PHANTOM = _product("interface-unknown-phantom", ProductCategory.AUDIO_INTERFACE, "Interface Unknown Phantom", {
     "microphone_inputs": _spec(2, SpecificationUnit.COUNT, "ev-interface-unknown-phantom-microphone-inputs"),
+    "microphone_input_connector": _spec("xlr", SpecificationUnit.CONNECTOR, "ev-interface-unknown-phantom-microphone-input-connector"),
+    "laptop_connector": _spec("usb-c", SpecificationUnit.CONNECTOR, "ev-interface-unknown-phantom-laptop-connector"),
+    "headphone_outputs": _spec(2, SpecificationUnit.COUNT, "ev-interface-unknown-phantom-headphone-outputs"),
     "phantom_power": _spec(None, None, "ev-interface-unknown-phantom-phantom-power", support=SupportStatus.UNKNOWN, freshness=FreshnessStatus.UNKNOWN, conflict=ConflictStatus.UNKNOWN),
 })
 INTERFACE_CONFLICT = _product("interface-conflict", ProductCategory.AUDIO_INTERFACE, "Interface Conflict", {
     "microphone_inputs": _spec(2, SpecificationUnit.COUNT, "ev-interface-conflict-microphone-inputs", conflict=ConflictStatus.CONFLICTING),
+    "microphone_input_connector": _spec("xlr", SpecificationUnit.CONNECTOR, "ev-interface-conflict-microphone-input-connector"),
     "laptop_connector": _spec("usb-a", SpecificationUnit.CONNECTOR, "ev-interface-conflict-laptop-connector"),
 })
 HEADPHONES_ALPHA = _product("headphones-alpha", ProductCategory.HEADPHONES, "Headphones Alpha", {
@@ -89,6 +95,7 @@ USB_C_TO_A = _product("adapter-usb-c-to-a", ProductCategory.USB_ADAPTER, "USB C 
 })
 INTERFACE_FOUR = _product("interface-four", ProductCategory.AUDIO_INTERFACE, "Interface Four", {
     "microphone_inputs": _spec(4, SpecificationUnit.COUNT, "ev-interface-four-microphone-inputs"),
+    "microphone_input_connector": _spec("xlr", SpecificationUnit.CONNECTOR, "ev-interface-four-microphone-input-connector"),
     "laptop_connector": _spec("usb-c", SpecificationUnit.CONNECTOR, "ev-interface-four-laptop-connector"),
     "headphone_outputs": _spec(2, SpecificationUnit.COUNT, "ev-interface-four-headphone-outputs"),
 })
