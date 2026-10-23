@@ -117,6 +117,8 @@ Phase 2 implements this as a JSON-serializable Member 1 output with `nodes`, `ed
 
 Member 1 proposes a bundle. Member 2 turns a selected proposal into a versioned, approvable plan and controls any payment recipient or amount.
 
+Phase 3 implements a local `BundleProposal`, `CostBreakdown`, `BundleLineItem`, `BundleSelectionRequest`, and `BundleSelectionResult`. The proposal key is deterministic and non-authoritative; it is not a Member 2 plan ID or approval record.
+
 ## ReplanRequest and ReplanProposal
 
 `ReplanRequest` starts with a known prior proposal and a concrete changed condition.

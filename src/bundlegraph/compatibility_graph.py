@@ -199,7 +199,10 @@ def _rule_connector(microphones: tuple[Product, ...], interface: Product | None)
 
 
 def _rule_phantom(microphones: tuple[Product, ...], interface: Product | None) -> CompatibilityFinding:
-    required_mics = [product for product in microphones if _specification(product, "phantom_power") and _specification(product, "phantom_power").value is True]
+    unknown_mics = [product for product in microphones if not _usable(_specification(product, "phantom_power"))]
+    if unknown_mics:
+        return _finding("R4_PHANTOM_POWER", FindingStatus.UNKNOWN, "MISSING_MICROPHONE_PHANTOM_POWER_EVIDENCE", "The phantom-power requirement for one or more selected microphones is not supported by usable evidence.", tuple(product.product_id for product in unknown_mics), tuple(evidence_id for product in unknown_mics for evidence_id in _evidence_ids(_specification(product, "phantom_power"))), tuple(_missing_spec(product, "phantom_power") for product in unknown_mics))
+    required_mics = [product for product in microphones if _specification(product, "phantom_power").value is True]
     if not required_mics:
         return _finding("R4_PHANTOM_POWER", FindingStatus.COMPATIBLE, "PHANTOM_POWER_NOT_REQUIRED", "No selected microphone has evidence that phantom power is required.", tuple(product.product_id for product in microphones))
     if interface is None:
