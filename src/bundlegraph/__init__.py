@@ -1,16 +1,6 @@
-"""Evidence-aware contracts and deterministic compatibility checks for BundleGraph."""
+"""Evidence-aware domain models and offline fixtures for BundleGraph."""
 
 from .compatibility import CompatibilityResult, CompatibilityState, assess_interface_capacity
-from .models import ConfirmedRequirements, Evidence, EvidenceStatus, Money, Product, ProductCategory
+from .models import ConfirmedRequirements, DraftRequirements, Evidence, MerchantOffer, Money, Product
 
-__all__ = [
-    "CompatibilityResult",
-    "CompatibilityState",
-    "ConfirmedRequirements",
-    "Evidence",
-    "EvidenceStatus",
-    "Money",
-    "Product",
-    "ProductCategory",
-    "assess_interface_capacity",
-]
+__all__ = ["CompatibilityResult", "CompatibilityState", "ConfirmedRequirements", "DraftRequirements", "Evidence", "MerchantOffer", "Money", "Product", "assess_interface_capacity"]

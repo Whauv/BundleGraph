@@ -1,6 +1,6 @@
 # Member 1 proposed contracts
 
-All models below are proposed interface contracts. They are not implemented by Phase 0 and must be reconciled with Member 2 before becoming shared schemas.
+Phase 1 implements the Member 1-local forms of these contracts. Their IDs, persistence behavior, and API envelope still require reconciliation with Member 2 before becoming shared schemas.
 
 ## Cross-cutting rules
 
@@ -69,7 +69,7 @@ The existing `ConfirmedRequirements` model is a preliminary local representation
 | `availability_evidence` | Evidence | Required for a non-unknown claim |
 | `retrieved_at` | date-time | Freshness evaluation input |
 
-The existing `Product` combines price and availability with the product. That is acceptable for a fixture but must be separated before live multi-merchant integration.
+Phase 1 separates the local `Product` and `MerchantOffer` contracts. Their identifier policy still needs Member 2 review before shared persistence or API integration.
 
 ## Evidence
 
