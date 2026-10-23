@@ -2,7 +2,6 @@ import pytest
 from pydantic import ValidationError
 
 from bundlegraph.catalog import CURATED_DEMO_CATALOG, CURATED_DEMO_OFFERS, INVALID_FIXTURE_CASES, OFFLINE_FIXTURE_CATALOG
-from bundlegraph.compatibility import CompatibilityState, assess_interface_capacity
 from bundlegraph.models import FreshnessStatus, Money, QuantityRequirement, Specification, SpecificationProvenance, SupportStatus, ConflictStatus, require_single_currency
 
 
@@ -14,11 +13,6 @@ def test_offline_fixtures_load_with_24_products_and_explained_scenarios() -> Non
     assert all(scenario.purpose and scenario.expected_outcome for scenario in OFFLINE_FIXTURE_CATALOG.scenarios)
     assert len(INVALID_FIXTURE_CASES) == 6
     assert {"one-input-insufficient", "phantom-required-unknown", "missing-xlr-cable", "adapter-direction", "independent-headphones-insufficient", "stale-and-conflicting", "attractive-incomplete-low-price", "complete-over-budget"}.issubset({scenario.scenario_id for scenario in OFFLINE_FIXTURE_CATALOG.scenarios})
-
-
-def test_one_input_interface_is_insufficient_for_two_microphones() -> None:
-    interface = next(product for product in CURATED_DEMO_CATALOG if product.product_id == "interface-one")
-    assert assess_interface_capacity(interface, 2).state is CompatibilityState.INCOMPATIBLE
 
 
 def test_unknown_specification_remains_unknown() -> None:

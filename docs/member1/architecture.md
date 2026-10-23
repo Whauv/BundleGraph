@@ -12,7 +12,7 @@ This document records the proposed Member 1 boundaries before new business logic
 | Dependencies | Pydantic 2.x; pytest is a test extra |
 | Existing checks | `python -m pytest`; no lint or type-check command is configured |
 | Existing models | `Money`, `Evidence`, `Product`, `MerchantOffer`, requirements, and fixture contracts |
-| Existing rules | Focused interface capacity helper plus Phase 2 deterministic graph evaluation |
+| Existing rules | Phase 2 deterministic compatibility graph evaluation |
 | Existing API/persistence | None found |
 | Existing shared schemas | None found |
 
@@ -64,4 +64,4 @@ The following require joint agreement before implementation:
 
 ## Existing-code protection
 
-Phase 0 does not change the existing `models`, `catalog`, or `compatibility` modules. Future work should adapt Member 2's published contracts if they become available rather than replacing its state or schema definitions.
+Phase 0 preserved the existing `models` and `catalog` modules. Future work should adapt Member 2's published contracts if they become available rather than replacing its state or schema definitions.

@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 import json
 from typing import Any, Mapping, Protocol, Sequence
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from .compatibility_graph import CompatibilityFinding
-from .models import ConflictStatus, Evidence, FixtureCatalog, FreshnessStatus
+from .models import Evidence, FixtureCatalog, FreshnessStatus
 
 EVIDENCE_INDEX_VERSION = 1
 DEFAULT_EVIDENCE_INDEX = f"bundlegraph-evidence-v{EVIDENCE_INDEX_VERSION}"

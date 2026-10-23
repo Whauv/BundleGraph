@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from .compatibility_graph import GraphEdge, GraphNode
 from .models import Money
-from .selection import BundleLineItem, BundleProposal, BundleSelectionRequest, BundleSelectionResult, Infeasibility, RequiredOfferQuantity, SearchStatus, select_bundles
+from .selection import BundleLineItem, BundleProposal, BundleSelectionRequest, Infeasibility, RequiredOfferQuantity, SearchStatus, select_bundles
 
 
 class ExecutionState(StrEnum):

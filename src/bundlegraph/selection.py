@@ -17,7 +17,6 @@ from .models import (
     FreshnessStatus,
     MerchantOffer,
     Money,
-    ProductCategory,
     SupportStatus,
     UnknownCost,
 )
