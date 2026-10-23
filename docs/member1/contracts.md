@@ -161,3 +161,7 @@ Channel3 discovery records use `Origin.LIVE` and `EvidenceSourceType.PROVIDER`. 
 ## Phase 7 bounded research boundary
 
 `ResearchRequest` can request only one missing attribute for one product variant at an approved source URL. `ResearchResult` is evidence/research status and trace references only; it cannot approve purchases or alter requirements. The `ResearchStatus` values `unknown` and `research_failed` are explicit safe outcomes. KERNEL navigation and Astropods extraction are injected capabilities with validated request, source, response, and resource boundaries.
+
+## Phase 8 dependency-aware re-planning
+
+`ReplanRequest` includes Member 2's original plan ID/version and immutable proposal, confirmation reference, failed/excluded candidates, execution facts, and locked components. `ReplanResult` returns replacement proposals or the existing structured solver infeasibility/search-limit state. `ReplacementBundleProposal` contains typed component deltas, dependency subgraph, costs, recovery uncertainty, compatibility evidence, material-change reasons, and `requires_new_approval`. It is never an authoritative plan version or approval decision.

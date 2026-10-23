@@ -62,6 +62,15 @@ class CostAllowance(BaseModel):
         return self
 
 
+class RequiredOfferQuantity(BaseModel):
+    """A retained component constraint supplied by a higher-level workflow."""
+
+    model_config = ConfigDict(frozen=True)
+
+    offer_id: str
+    quantity: int = Field(gt=0)
+
+
 class BundleSelectionRequest(BaseModel):
     """Inputs for one bounded search; exclusions are exact product or offer identifiers."""
 
@@ -73,6 +82,7 @@ class BundleSelectionRequest(BaseModel):
     excluded_offer_ids: frozenset[str] = frozenset()
     limits: SolverLimits = SolverLimits()
     cost_allowance: CostAllowance | None = None
+    required_offer_quantities: tuple[RequiredOfferQuantity, ...] = ()
 
 
 class BundleLineItem(BaseModel):
@@ -198,6 +208,9 @@ def _cost_breakdown(line_items: tuple[BundleLineItem, ...], allowance: CostAllow
 
 def _proposal(request: BundleSelectionRequest, selected_offers: tuple[MerchantOffer, ...]) -> tuple[BundleProposal | None, str | None]:
     line_items = _line_items(selected_offers)
+    quantities = Counter(offer.offer_id for offer in selected_offers)
+    if any(quantities[item.offer_id] < item.quantity for item in request.required_offer_quantities):
+        return None, "LOCKED_COMPONENT_NOT_RETAINED"
     cost = _cost_breakdown(line_items, request.cost_allowance)
     if cost is None or cost.currency != request.requirements.budget.currency:
         return None, "CURRENCY_MISMATCH"

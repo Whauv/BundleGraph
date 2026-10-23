@@ -33,3 +33,7 @@ python -m pytest
 ## Bounded evidence research
 
 `bundlegraph.evidence_research` provides a source-allowlisted, one-session research workflow for a missing product fact. KERNEL and Astropods providers are injected interfaces and fail closed until configured. The workflow has no approval, payment, login, or form-submission capability. See [research bounds and provider status](docs/member1/bounded-evidence-research.md).
+
+## Dependency-aware re-planning
+
+`bundlegraph.replanning` turns a Member 2-supplied failed component into deterministic, non-authoritative replacement proposals. It reuses the bounded solver, preserves locked components and confirmed constraints, emits structured deltas and dependency subgraphs, and always marks material recovery proposals as requiring new approval. See [re-planning handoff](docs/member1/dependency-aware-replanning.md).
