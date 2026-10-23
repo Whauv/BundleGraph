@@ -212,7 +212,7 @@ class Constraint(BaseModel):
 class DraftRequirements(BaseModel):
     """Unconfirmed constraints. Missing information stays explicit."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
     request_reference: str = Field(min_length=1)
     use_case: str | None = None
     participants: int | None = Field(default=None, gt=0)
@@ -223,7 +223,7 @@ class DraftRequirements(BaseModel):
     hard_constraints: tuple[Constraint, ...] = ()
     preferences: tuple[Constraint, ...] = ()
     deadline: datetime | None = None
-    missing_information: tuple[str, ...] = Field(min_length=1)
+    missing_information: tuple[str, ...] = ()
 
     @field_validator("deadline")
     @classmethod

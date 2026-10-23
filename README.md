@@ -20,4 +20,4 @@ python -m pytest
 
 ## Package boundary
 
-`bundlegraph.models` contains the shared contracts. `bundlegraph.catalog` contains the explicitly labeled offline fixture catalog. `bundlegraph.compatibility` evaluates interface capacity without bundle selection. Solver, provider adapters, and replanning remain later Member 1 phases.
+`bundlegraph.models` contains the shared contracts. `bundlegraph.catalog` contains the explicitly labeled offline fixture catalog. `bundlegraph.compatibility_graph` evaluates deterministic compatibility, `bundlegraph.selection` performs bounded exact search, and Phase 4 provides injectable interpretation and callable service adapters without a provider SDK, router, or database.

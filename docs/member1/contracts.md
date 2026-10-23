@@ -145,3 +145,7 @@ The Member 2 backend may map its routes to these operations:
 | Replan | ReplanRequest | ReplanProposal or infeasibility result |
 
 State-changing routes, approval routes, payment routes, and persistence endpoints are Member 2 territory. Member 3 should receive the proposal, findings, evidence, and explicit status fields through the authoritative backend rather than invoking providers directly.
+
+## Phase 4 envelopes
+
+`GenerateBundlePlansRequest` and `GetBundlePlanEvidenceRequest` require schema version `1.0` and a correlation ID. `ServiceResponse` includes the same schema version, correlation ID, timezone-aware generation timestamp, status, and machine-readable reason codes. Extraction providers return only validated drafts; they cannot supply a confirmation reference or approval state.
