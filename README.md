@@ -18,6 +18,23 @@ This package deliberately contains no payment, authentication, persistence, fron
 python -m pytest
 ```
 
+## Offline demo and evaluation
+
+Install the local package once to use the module commands:
+
+```powershell
+python -m pip install -e ".[test]"
+```
+
+The demo and evaluation use only the explicitly labeled synthetic fixture catalog; neither makes a provider call:
+
+```powershell
+python -m bundlegraph.demo
+python -m bundlegraph.evaluation
+```
+
+See [the measured offline results](docs/member1/evaluation-results.md), [security review](docs/member1/security-review.md), and [Phase 9 handoff](docs/member1/phase9-handoff.md). `.env.example` contains only empty server-side configuration placeholders. The Channel3 live smoke test is explicitly opt-in and requires Member 2's server-side deployment configuration; it is skipped during normal tests.
+
 ## Package boundary
 
 `bundlegraph.models` contains the shared contracts. `bundlegraph.catalog` contains the explicitly labeled offline fixture catalog. `bundlegraph.compatibility_graph` evaluates deterministic compatibility, `bundlegraph.selection` performs bounded exact search, and `bundlegraph.interpretation` provides injectable requirement extraction.
