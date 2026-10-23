@@ -71,6 +71,10 @@ The smoke test performs one bounded Channel3 discovery request. It does not exec
 - `pytest` command missing: use `python -m pytest`, which runs the dependency installed by the test extra.
 - Live smoke test skipped: this is expected unless both opt-in environment variables are securely configured.
 
+## Architecture diagram
+
+The interactive [Member 1 intelligence-boundary diagram](docs/architecture/member1-intelligence-boundary.html) shows the deterministic planning path, optional provider adapters, and the Member 2 ownership boundary. Its versioned [Archify source](docs/architecture/member1-intelligence-boundary.architecture.json) is included for future updates.
+
 ## Package boundary
 
 `bundlegraph.models` contains the shared contracts. `bundlegraph.catalog` contains the explicitly labeled offline fixture catalog. `bundlegraph.compatibility_graph` evaluates deterministic compatibility, `bundlegraph.selection` performs bounded exact search, and `bundlegraph.interpretation` provides injectable requirement extraction.

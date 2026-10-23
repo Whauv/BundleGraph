@@ -1,0 +1,208 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "BundleGraph: Member 1 intelligence boundary",
+    "subtitle": "Deterministic bundle planning with Member 2-owned confirmation, persistence, and approval state. Live adapters are optional and fail closed when unconfigured.",
+    "output": "docs/architecture/member1-intelligence-boundary.html",
+    "quality_profile": "showcase",
+    "locale": "en",
+    "repository": {
+      "url": "https://github.com/Whauv/BundleGraph.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "e7c7f03c24349eb74bfbe8f5df2b1de43e51c3e9"
+    },
+    "legend": {
+      "mode": "all",
+      "entries": {
+        "frontend": { "label": "Integration adapters" },
+        "backend": { "label": "Planning services" },
+        "security": { "label": "Deterministic decision boundary" },
+        "database": { "label": "Evidence storage port" },
+        "cloud": { "label": "Catalog normalization" },
+        "external": { "label": "External owner or opt-in provider" }
+      }
+    }
+  },
+  "components": [
+    {
+      "id": "member2",
+      "type": "external",
+      "label": "Member 2 backend",
+      "sublabel": "IDs · confirmation · approval",
+      "pos": [15, 330],
+      "size": [130, 70],
+      "sources": [{ "path": "src/bundlegraph/service.py", "line": 73, "end_line": 76, "label": "Member 2-owned persistence port" }]
+    },
+    {
+      "id": "model_provider",
+      "type": "external",
+      "label": "Model provider",
+      "sublabel": "injected; unconfigured",
+      "pos": [15, 120],
+      "size": [130, 64],
+      "sources": [{ "path": "src/bundlegraph/interpretation.py", "line": 70, "end_line": 99, "label": "injected extraction provider fails closed" }]
+    },
+    {
+      "id": "requirements",
+      "type": "frontend",
+      "label": "Requirements",
+      "sublabel": "validated draft · clarifications",
+      "pos": [160, 120],
+      "size": [135, 64],
+      "sources": [{ "path": "src/bundlegraph/interpretation.py", "line": 112, "end_line": 127, "label": "validates untrusted extraction output" }]
+    },
+    {
+      "id": "api_adapter",
+      "type": "frontend",
+      "label": "API adapter",
+      "sublabel": "schema · correlation ID",
+      "pos": [160, 330],
+      "size": [135, 70],
+      "sources": [{ "path": "src/bundlegraph/service.py", "line": 89, "end_line": 106, "label": "validates request and calls selection" }]
+    },
+    {
+      "id": "catalog",
+      "type": "cloud",
+      "label": "Catalog normalization",
+      "sublabel": "products · offers · evidence",
+      "pos": [310, 330],
+      "size": [135, 70],
+      "sources": [{ "path": "src/bundlegraph/models.py", "line": 113, "end_line": 190, "label": "product, offer, and evidence contracts" }, { "path": "src/bundlegraph/catalog.py", "line": 1, "end_line": 35, "label": "clearly labeled synthetic fixture catalog" }]
+    },
+    {
+      "id": "compatibility",
+      "type": "security",
+      "label": "Compatibility graph",
+      "sublabel": "eight rules · unknown blocks",
+      "pos": [460, 330],
+      "size": [135, 70],
+      "sources": [{ "path": "src/bundlegraph/compatibility_graph.py", "line": 313, "end_line": 331, "label": "evaluates selected products into graph findings" }]
+    },
+    {
+      "id": "solver",
+      "type": "backend",
+      "label": "Exact solver",
+      "sublabel": "cost · ranking · limits",
+      "pos": [610, 330],
+      "size": [135, 70],
+      "sources": [{ "path": "src/bundlegraph/selection.py", "line": 74, "end_line": 85, "label": "selection input contract" }, { "path": "src/bundlegraph/selection.py", "line": 233, "end_line": 262, "label": "bounded deterministic bundle search" }]
+    },
+    {
+      "id": "proposal",
+      "type": "backend",
+      "label": "Proposal output",
+      "sublabel": "non-authoritative output",
+      "pos": [760, 330],
+      "size": [135, 70],
+      "sources": [{ "path": "src/bundlegraph/selection.py", "line": 112, "end_line": 141, "label": "proposal result contract" }, { "path": "src/bundlegraph/replanning.py", "line": 178, "end_line": 194, "label": "replacement creation preserves original plan" }]
+    },
+    {
+      "id": "fixture_catalog",
+      "type": "cloud",
+      "label": "Fixture catalog",
+      "sublabel": "synthetic · offline only",
+      "pos": [310, 550],
+      "size": [135, 64],
+      "sources": [{ "path": "src/bundlegraph/catalog.py", "line": 1, "end_line": 13, "label": "synthetic fixture provenance" }]
+    },
+    {
+      "id": "evidence_repository",
+      "type": "database",
+      "label": "Evidence repository",
+      "sublabel": "in-memory · optional Elastic",
+      "pos": [460, 550],
+      "size": [135, 64],
+      "sources": [{ "path": "src/bundlegraph/evidence_repository.py", "line": 73, "end_line": 177, "label": "repository interface and in-memory adapter" }]
+    },
+    {
+      "id": "research",
+      "type": "backend",
+      "label": "Evidence research",
+      "sublabel": "allowlist · budgets · validation",
+      "pos": [610, 550],
+      "size": [135, 64],
+      "sources": [{ "path": "src/bundlegraph/evidence_research.py", "line": 148, "end_line": 180, "label": "bounded lookup, ingest, and safe failure" }]
+    },
+    {
+      "id": "evaluation",
+      "type": "backend",
+      "label": "Offline evaluation",
+      "sublabel": "labeled tests · offline only",
+      "pos": [760, 550],
+      "size": [135, 64],
+      "sources": [{ "path": "src/bundlegraph/evaluation.py", "line": 34, "end_line": 95, "label": "runs labeled offline benchmark cases" }]
+    },
+    {
+      "id": "channel3",
+      "type": "external",
+      "label": "Channel3",
+      "sublabel": "opt-in discovery",
+      "pos": [310, 690],
+      "size": [135, 64],
+      "sources": [{ "path": "src/bundlegraph/channel3.py", "line": 193, "end_line": 264, "label": "bounded discovery adapter" }]
+    },
+    {
+      "id": "elastic",
+      "type": "external",
+      "label": "Elastic",
+      "sublabel": "optional retrieval deployment",
+      "pos": [460, 690],
+      "size": [135, 64],
+      "sources": [{ "path": "src/bundlegraph/evidence_repository.py", "line": 149, "end_line": 177, "label": "optional Elastic repository adapter" }]
+    },
+    {
+      "id": "research_providers",
+      "type": "external",
+      "label": "KERNEL / Astropods",
+      "sublabel": "injected browser + extractor",
+      "pos": [610, 690],
+      "size": [135, 64],
+      "sources": [{ "path": "src/bundlegraph/evidence_research.py", "line": 76, "end_line": 90, "label": "research provider protocols" }, { "path": "src/bundlegraph/evidence_research.py", "line": 136, "end_line": 145, "label": "unconfigured providers fail closed" }]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Member 1 intelligence package",
+      "wraps": ["requirements", "api_adapter", "catalog", "compatibility", "solver", "proposal", "fixture_catalog", "evidence_repository", "research", "evaluation"],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    { "from": "member2", "to": "api_adapter", "label": "confirmed request", "variant": "emphasis" },
+    { "from": "api_adapter", "to": "solver", "label": "selection input", "variant": "emphasis" },
+    { "from": "solver", "to": "compatibility", "label": "evaluate", "variant": "security" },
+    { "from": "compatibility", "to": "solver", "label": "findings", "variant": "security" },
+    { "from": "catalog", "to": "solver", "label": "catalog" },
+    { "from": "solver", "to": "proposal", "label": "ranked proposals or infeasibility", "variant": "emphasis" },
+    { "from": "proposal", "to": "member2", "label": "proposal", "variant": "security" },
+    { "from": "member2", "to": "requirements", "label": "interpretation request" },
+    { "from": "model_provider", "to": "requirements", "label": "untrusted structured extraction", "variant": "dashed" },
+    { "from": "requirements", "to": "member2", "label": "draft and clarifications", "variant": "dashed" },
+    { "from": "fixture_catalog", "to": "catalog", "label": "fixture candidates", "variant": "dashed" },
+    { "from": "channel3", "to": "catalog", "label": "optional normalized discovery", "variant": "dashed" },
+    { "from": "research", "to": "evidence_repository", "label": "lookup and ingest", "variant": "security" },
+    { "from": "elastic", "to": "evidence_repository", "label": "optional live implementation", "variant": "dashed" },
+    { "from": "research_providers", "to": "research", "label": "bounded page and extraction", "variant": "dashed" },
+    { "from": "proposal", "to": "evaluation", "label": "proposal behavior under fixtures", "variant": "dashed" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Verified decision path",
+      "items": ["Compatibility outcomes come only from deterministic rules.", "Unknown or conflicting required evidence cannot produce a verified complete bundle.", "Solver totals include quantities and do not treat unknown shipping or tax as zero."]
+    },
+    {
+      "dot": "cyan",
+      "title": "Ownership boundary",
+      "items": ["Member 2 owns durable plan IDs, confirmation, approval state, and persistence.", "Member 1 returns non-authoritative proposals and typed re-planning deltas.", "No payment, purchase, refund, or cancellation capability exists in this package."]
+    },
+    {
+      "dot": "rose",
+      "title": "Provider safety",
+      "items": ["Normal tests and evaluation are offline and use synthetic fixture data.", "Live providers are injected or opt-in and remain unverified without credentials and deployment configuration.", "Research validates destinations, redirects, response budgets, and extractor output before storing evidence."]
+    }
+  ]
+}
