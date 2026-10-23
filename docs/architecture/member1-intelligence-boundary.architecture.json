@@ -11,7 +11,7 @@
       "url": "https://github.com/Whauv/BundleGraph.git",
       "provider": "github",
       "link_mode": "web",
-      "revision": "e7c7f03c24349eb74bfbe8f5df2b1de43e51c3e9"
+      "revision": "a8ed5fc33f57a9401f4b381878cc85145fb5b95f"
     },
     "legend": {
       "mode": "all",
@@ -87,7 +87,7 @@
       "sublabel": "cost · ranking · limits",
       "pos": [610, 330],
       "size": [135, 70],
-      "sources": [{ "path": "src/bundlegraph/selection.py", "line": 74, "end_line": 85, "label": "selection input contract" }, { "path": "src/bundlegraph/selection.py", "line": 233, "end_line": 262, "label": "bounded deterministic bundle search" }]
+      "sources": [{ "path": "src/bundlegraph/selection.py", "line": 74, "end_line": 85, "label": "selection input contract" }, { "path": "src/bundlegraph/selection.py", "line": 233, "end_line": 261, "label": "bounded deterministic bundle search" }]
     },
     {
       "id": "proposal",
@@ -96,7 +96,7 @@
       "sublabel": "non-authoritative output",
       "pos": [760, 330],
       "size": [135, 70],
-      "sources": [{ "path": "src/bundlegraph/selection.py", "line": 112, "end_line": 141, "label": "proposal result contract" }, { "path": "src/bundlegraph/replanning.py", "line": 178, "end_line": 194, "label": "replacement creation preserves original plan" }]
+      "sources": [{ "path": "src/bundlegraph/selection.py", "line": 112, "end_line": 141, "label": "proposal result contract" }, { "path": "src/bundlegraph/replanning.py", "line": 178, "end_line": 193, "label": "replacement creation preserves original plan" }]
     },
     {
       "id": "fixture_catalog",
