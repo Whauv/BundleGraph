@@ -153,3 +153,7 @@ State-changing routes, approval routes, payment routes, and persistence endpoint
 ## Phase 5 Channel3 discovery boundary
 
 Channel3 discovery records use `Origin.LIVE` and `EvidenceSourceType.PROVIDER`. Provider canonical IDs and selected variant values are retained in `Channel3DiscoveredProduct` and `Channel3DiscoveredOffer`; local normalized IDs are namespaced deterministic IDs. Provider attributes without explicit BundleGraph units remain provider evidence, rather than becoming compatibility specifications. `MerchantOffer.shipping` and `MerchantOffer.tax` are explicit unknowns when Channel3 search does not provide them. See `docs/member1/channel3-provider.md` for the verified interface and deduplication rules.
+
+## Phase 6 evidence repository boundary
+
+`EvidenceRecord` binds an existing `Evidence` claim to product and variant identity. Repositories ingest by `evidence_id`, filter retrieval by product ID, variant ID, and attribute, and resolve finding evidence references. `EvidenceLookupResult` reports the actual `keyword` or `hybrid` retrieval mode, effective freshness, conflicts, and explicit absence. A retrieval score is never a compatibility finding. `ElasticEvidenceRepository` uses the versioned `bundlegraph-evidence-v1` mapping; `InMemoryEvidenceRepository` is the normal offline implementation.
