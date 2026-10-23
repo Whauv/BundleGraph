@@ -157,3 +157,7 @@ Channel3 discovery records use `Origin.LIVE` and `EvidenceSourceType.PROVIDER`. 
 ## Phase 6 evidence repository boundary
 
 `EvidenceRecord` binds an existing `Evidence` claim to product and variant identity. Repositories ingest by `evidence_id`, filter retrieval by product ID, variant ID, and attribute, and resolve finding evidence references. `EvidenceLookupResult` reports the actual `keyword` or `hybrid` retrieval mode, effective freshness, conflicts, and explicit absence. A retrieval score is never a compatibility finding. `ElasticEvidenceRepository` uses the versioned `bundlegraph-evidence-v1` mapping; `InMemoryEvidenceRepository` is the normal offline implementation.
+
+## Phase 7 bounded research boundary
+
+`ResearchRequest` can request only one missing attribute for one product variant at an approved source URL. `ResearchResult` is evidence/research status and trace references only; it cannot approve purchases or alter requirements. The `ResearchStatus` values `unknown` and `research_failed` are explicit safe outcomes. KERNEL navigation and Astropods extraction are injected capabilities with validated request, source, response, and resource boundaries.

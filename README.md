@@ -29,3 +29,7 @@ python -m pytest
 ## Evidence retrieval
 
 `bundlegraph.evidence_repository` defines a shared evidence repository, deterministic in-memory implementation, and opt-in Elastic adapter. It filters records by product variant and attribute, exposes freshness, missing evidence, and conflicting values, and resolves compatibility-finding evidence IDs. Keyword retrieval is the default; vector/hybrid retrieval is enabled only after the operator confirms Elastic vector support and dimensions. See [Elastic setup and reindexing](docs/member1/elastic-evidence.md).
+
+## Bounded evidence research
+
+`bundlegraph.evidence_research` provides a source-allowlisted, one-session research workflow for a missing product fact. KERNEL and Astropods providers are injected interfaces and fail closed until configured. The workflow has no approval, payment, login, or form-submission capability. See [research bounds and provider status](docs/member1/bounded-evidence-research.md).
