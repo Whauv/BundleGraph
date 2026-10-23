@@ -12,19 +12,39 @@ This package deliberately contains no payment, authentication, persistence, fron
 - The fixture catalog contains 24 entirely synthetic products and 15 synthetic offers, including intentionally difficult selection scenarios.
 - An interface needs evidence for enough microphone inputs. For two microphones, one input is a deterministic rejection.
 
-## Run tests
+## Quick start
+
+Prerequisite: Python 3.12 or newer. Check it with `python --version`.
+
+Clone the repository, create an isolated virtual environment, and install the package with its test tools:
 
 ```powershell
-python -m pytest
+git clone https://github.com/Whauv/BundleGraph.git
+cd BundleGraph
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e ".[test]"
+```
+
+If PowerShell activation is unavailable, run the virtual-environment interpreter directly instead:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[test]"
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+On macOS or Linux, activate the environment with `source .venv/bin/activate` before running the same `python -m ...` commands.
+
+The normal workflow is entirely offline and needs no provider account, database, Elastic cluster, or secret:
+
+```powershell
+python -m pytest -q
+python -m bundlegraph.demo
+python -m bundlegraph.evaluation
 ```
 
 ## Offline demo and evaluation
-
-Install the local package once to use the module commands:
-
-```powershell
-python -m pip install -e ".[test]"
-```
 
 The demo and evaluation use only the explicitly labeled synthetic fixture catalog; neither makes a provider call:
 
@@ -34,6 +54,22 @@ python -m bundlegraph.evaluation
 ```
 
 See [the measured offline results](docs/member1/evaluation-results.md), [security review](docs/member1/security-review.md), and [Phase 9 handoff](docs/member1/phase9-handoff.md). `.env.example` contains only empty server-side configuration placeholders. The Channel3 live smoke test is explicitly opt-in and requires Member 2's server-side deployment configuration; it is skipped during normal tests.
+
+## Optional live smoke test
+
+Do not use fixture data or a frontend to configure provider credentials. In a protected server-side environment, set `BUNDLEGRAPH_RUN_LIVE_SMOKE=1` and `CHANNEL3_API_KEY` through the deployment secret manager, then run:
+
+```powershell
+python -m pytest -q tests/test_live_smoke.py
+```
+
+The smoke test performs one bounded Channel3 discovery request. It does not execute payments, purchases, approvals, or bundle selection. A skipped test means the live check was not run.
+
+## Troubleshooting
+
+- `ModuleNotFoundError: bundlegraph`: activate `.venv` or use `.\.venv\Scripts\python.exe`, then reinstall with `python -m pip install -e ".[test]"`.
+- `pytest` command missing: use `python -m pytest`, which runs the dependency installed by the test extra.
+- Live smoke test skipped: this is expected unless both opt-in environment variables are securely configured.
 
 ## Package boundary
 
