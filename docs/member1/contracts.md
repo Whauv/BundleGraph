@@ -149,3 +149,7 @@ State-changing routes, approval routes, payment routes, and persistence endpoint
 ## Phase 4 envelopes
 
 `GenerateBundlePlansRequest` and `GetBundlePlanEvidenceRequest` require schema version `1.0` and a correlation ID. `ServiceResponse` includes the same schema version, correlation ID, timezone-aware generation timestamp, status, and machine-readable reason codes. Extraction providers return only validated drafts; they cannot supply a confirmation reference or approval state.
+
+## Phase 5 Channel3 discovery boundary
+
+Channel3 discovery records use `Origin.LIVE` and `EvidenceSourceType.PROVIDER`. Provider canonical IDs and selected variant values are retained in `Channel3DiscoveredProduct` and `Channel3DiscoveredOffer`; local normalized IDs are namespaced deterministic IDs. Provider attributes without explicit BundleGraph units remain provider evidence, rather than becoming compatibility specifications. `MerchantOffer.shipping` and `MerchantOffer.tax` are explicit unknowns when Channel3 search does not provide them. See `docs/member1/channel3-provider.md` for the verified interface and deduplication rules.
