@@ -94,3 +94,14 @@ The interactive [Member 1 intelligence-boundary diagram](docs/architecture/membe
 ## Dependency-aware re-planning
 
 `bundlegraph.replanning` turns a Member 2-supplied failed component into deterministic, non-authoritative replacement proposals. It reuses the bounded solver, preserves locked components and confirmed constraints, emits structured deltas and dependency subgraphs, and always marks material recovery proposals as requiring new approval. See [re-planning handoff](docs/member1/dependency-aware-replanning.md).
+
+## Member 2 application layer
+
+`bundlegraph_app` is the authoritative application layer: durable plan IDs and versions, approval binding by plan-version fingerprint, idempotent PayPal sandbox adapter (authorize/capture/void/refund), webhook deduplication, and a FastAPI boundary wiring Member 1's handlers. It is strictly outside the `bundlegraph` intelligence package and lives in `src/bundlegraph_app/`.
+
+```powershell
+python -m pip install -e ".[app]"
+python -m uvicorn bundlegraph_app.main:app --port 8080
+```
+
+See [Member 2 overview](docs/member2/README.md), [state machine](docs/member2/state-machine.md), [PayPal integration](docs/member2/paypal-integration.md), and [deployment](docs/member2/deployment.md).

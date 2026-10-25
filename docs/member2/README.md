@@ -1,0 +1,56 @@
+# Member 2: application, PayPal, deployment
+
+This directory holds the authoritative Member 2 contribution: the application state
+machine, the PayPal sandbox adapter, and the HTTP boundary wiring Member 1's
+deterministic planning layer.
+
+The code lives in `src/bundlegraph_app/`, strictly outside the `bundlegraph`
+intelligence package. Member 1's AGENTS boundary is intact: this package does not
+add compatibility, solver, or research logic.
+
+## Deliverables
+
+| Phase (per team proposal) | Deliverable | Status |
+| --- | --- | --- |
+| Oct 22–24: validate hardest dependencies | PayPal lifecycle paths (authorize/capture/void/refund) proven against an in-process sandbox fake with idempotency and allowlist | shipped |
+| Oct 25–28: deliver vertical slice | request → bundle → approval → sandbox authorize + capture | shipped (offline fixtures) |
+| Nov 2–5: implement recovery | replan supersession invalidates the prior approval; webhook duplicates/out-of-order deliveries are a no-op | shipped |
+| Nov 2–5: deployment | FastAPI entrypoint `bundlegraph_app.main:app`; render service note below | shipped (local) |
+
+## Key design decisions
+
+- **Approval binding is a plan-version fingerprint, not just a plan id.** Any material
+  change (price, recipient, component, quantity) produces a new fingerprint, so a
+  previously granted approval is invalidated without needing a manual revoke step.
+- **PayPal operation ids are the authoritative idempotency key.** The adapter builds
+  `PayPal-Request-Id = bg-<kind>-<operation_id>`, so a replayed call to the service
+  returns the stored result and never calls PayPal twice.
+- **Recipient references come from the server-side catalog only.** LLM output or
+  browser content never flows into a payment recipient; the catalog embedded in the
+  request is the only source for `merchant_reference`.
+- **Terminal statuses are terminal.** `SUCCEEDED`/`FAILED` operations and `EXECUTED`
+  plans cannot be re-opened; the state transition table in `state.py` enforces this.
+- **Replan always invalidates.** `apply_replan` writes a new version and marks every
+  prior granted approval `INVALIDATED` — material substitutions require a new
+  approval even if the previous recipient and total happen to match.
+
+## Running the demo backend
+
+```powershell
+python -m pip install -e ".[app]"
+python -m uvicorn bundlegraph_app.main:app --port 8080
+```
+
+With no PayPal credentials, the deployment uses the deterministic in-process
+sandbox and the in-memory repositories. Replace both with the production adapter
+and PostgreSQL-backed repositories for a hosted deploy; the interfaces are the
+same.
+
+## Tests
+
+```powershell
+python -m pytest tests/test_app_state_machine.py tests/test_app_paypal_adapter.py tests/test_app_application_service.py tests/test_app_api.py -q
+```
+
+See [state machine notes](state-machine.md), [PayPal integration notes](paypal-integration.md),
+and [deployment notes](deployment.md).
