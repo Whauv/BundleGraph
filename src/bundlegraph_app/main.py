@@ -12,9 +12,14 @@ from .api import build_app
 from .application import ApplicationService
 from .paypal import FakeSandboxClient, PayPalAdapter
 from .persistence import new_in_memory_repositories
+from .planning import PlanningInputsRepository
+from .config import RuntimeMode, production_settings, runtime_mode
 
 
 def _build() -> "FastAPI":  # noqa: F821 -- forward reference for lazy FastAPI import
+    if runtime_mode() is RuntimeMode.PRODUCTION:
+        production_settings()
+        raise RuntimeError("production startup blocked: PostgreSQL, authentication, PayPal Orders, and webhook verifier adapters are not configured")
     plans, approvals, payments, webhooks, evidence_reader = new_in_memory_repositories()
     sandbox_recipients = frozenset(
         os.getenv("BUNDLEGRAPH_SANDBOX_RECIPIENTS", "merchant-reference-demo").split(",")
@@ -28,7 +33,10 @@ def _build() -> "FastAPI":  # noqa: F821 -- forward reference for lazy FastAPI i
         evidence_reader=evidence_reader,
         paypal=adapter,
     )
-    return build_app(service, evidence_reader)
+    # A real deployment injects a durable confirmation/catalog repository during
+    # startup.  The empty local repository deliberately fails closed until an
+    # authoritative confirmation has been registered.
+    return build_app(service, evidence_reader, PlanningInputsRepository(), readiness={"persistence": False, "authentication": False, "paypal": False, "webhook_verifier": False})
 
 
 app = _build()

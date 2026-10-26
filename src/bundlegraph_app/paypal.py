@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Protocol
+from typing import Any, Protocol
 
 from .state import Money, PaymentOperationKind
 
@@ -54,6 +54,19 @@ class PayPalSandboxClient(Protocol):
     def void(self, *, request_id: str, authorization_reference: str, operation_id: str) -> PayPalResult: ...
 
     def refund(self, *, request_id: str, capture_reference: str, amount: Money, operation_id: str) -> PayPalResult: ...
+
+
+class PayPalWebhookVerifier(Protocol):
+    """Server-side verifier; request JSON must never claim it is verified."""
+
+    def verify(self, payload: dict[str, Any]) -> bool: ...
+
+
+class RejectingWebhookVerifier:
+    """Safe default until a configured PayPal signature-verification client exists."""
+
+    def verify(self, payload: dict[str, Any]) -> bool:
+        return False
 
 
 class PayPalAdapter:

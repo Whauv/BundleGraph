@@ -12,12 +12,18 @@ Product descriptions and evidence excerpts are treated as data. They are never e
 
 ## Member 2 adapters
 
-Map `POST /bundle-plans/generate` to `handle_generate_bundle_plans(raw_request)`. It validates a `GenerateBundlePlansRequest` with:
+`POST /bundle-plans/generate` accepts only a schema version, correlation ID, and
+Member 2-issued confirmation reference. Member 2 resolves the confirmed requirements
+and normalized catalog from its authoritative store, then constructs the
+`GenerateBundlePlansRequest` internally. It must not accept a caller-supplied
+confirmed-requirements or catalog payload as authoritative.
+
+The internal request passed to `handle_generate_bundle_plans` has this shape:
 
 ```json
 {
   "schema_version": "1.0",
-  "correlation_id": "client-generated-or-server-assigned-id",
+  "correlation_id": "authoritative-request-correlation-id",
   "selection": { "requirements": "ConfirmedRequirements", "catalog": "validated candidates" }
 }
 ```

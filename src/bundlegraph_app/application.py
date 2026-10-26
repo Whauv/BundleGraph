@@ -69,6 +69,7 @@ class ApplyReplanInput:
     confirmation_reference: str
     correlation_id: str
     merchant_lookup: dict[str, str]
+    evidence: tuple[Evidence, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,7 +106,7 @@ class ApplicationService:
     # ------------------------------------------------------------------
 
     def create_plan(self, data: CreatePlanInput) -> Plan:
-        line_items, total = self._line_items_from_proposal(data.proposal, data.merchant_lookup)
+        line_items, total, recipient = self._line_items_from_proposal(data.proposal, data.merchant_lookup)
         plan_id = new_id("plan")
         version_payload = _plan_version_payload(
             plan_id=plan_id,
@@ -113,6 +114,7 @@ class ApplicationService:
             confirmation_reference=data.confirmation_reference,
             line_items=line_items,
             total=total,
+            payment_recipient_reference=recipient,
         )
         fingerprint = plan_version_fingerprint(version_payload)
         now = self._now()
@@ -125,6 +127,7 @@ class ApplicationService:
             correlation_id=data.correlation_id,
             line_items=line_items,
             total=total,
+            payment_recipient_reference=recipient,
             payload=version_payload,
         )
         plan = Plan(
@@ -204,8 +207,6 @@ class ApplicationService:
         *,
         approval_id: str,
         operation_id: str,
-        recipient_reference: str,
-        amount: Money,
     ) -> PaymentOperation:
         existing = self._payments.get(operation_id)
         if existing is not None:
@@ -215,10 +216,8 @@ class ApplicationService:
         head = plan.head()
         if approval.plan_fingerprint != head.fingerprint:
             raise ApplicationError("approval no longer matches the current plan version")
-        if amount.currency != approval.permitted_total.currency:
-            raise ApplicationError("authorize currency must match the approval")
-        if amount.amount_minor > approval.permitted_total.amount_minor:
-            raise ApplicationError("authorize amount exceeds the permitted total")
+        if head.total != approval.permitted_total:
+            raise ApplicationError("approval total no longer matches the stored plan total")
         now = self._now()
         operation = PaymentOperation(
             operation_id=operation_id,
@@ -228,11 +227,13 @@ class ApplicationService:
             kind=PaymentOperationKind.AUTHORIZE,
             status=PaymentOperationStatus.SUBMITTED,
             idempotency_key=PayPalAdapter.idempotency_key(operation_id, PaymentOperationKind.AUTHORIZE),
-            recipient_reference=recipient_reference,
-            amount=amount,
+            recipient_reference=head.payment_recipient_reference,
+            amount=head.total,
             submitted_at=now,
         )
-        self._payments.save(operation)
+        operation, created = self._payments.create_if_absent(operation)
+        if not created:
+            return operation
         if plan.status is PlanStatus.APPROVED:
             ensure_plan_transition(plan.status, PlanStatus.EXECUTING)
             plan.status = PlanStatus.EXECUTING
@@ -240,8 +241,8 @@ class ApplicationService:
             self._plans.save(plan)
         result = self._paypal.authorize(
             operation_id=operation_id,
-            recipient_reference=recipient_reference,
-            amount=amount,
+            recipient_reference=head.payment_recipient_reference,
+            amount=head.total,
         )
         return self._apply_result(operation, result)
 
@@ -250,17 +251,12 @@ class ApplicationService:
         *,
         parent_operation_id: str,
         operation_id: str,
-        amount: Money,
     ) -> PaymentOperation:
         existing = self._payments.get(operation_id)
         if existing is not None:
             return existing
         parent = self._require_succeeded_authorization(parent_operation_id)
         approval = self._require_granted_approval(parent.approval_id)
-        if amount.currency != parent.amount.currency or amount.amount_minor > parent.amount.amount_minor:
-            raise ApplicationError("capture amount is not consistent with the authorization")
-        if amount.amount_minor > approval.permitted_total.amount_minor:
-            raise ApplicationError("capture amount exceeds the permitted total")
         now = self._now()
         operation = PaymentOperation(
             operation_id=operation_id,
@@ -271,15 +267,17 @@ class ApplicationService:
             status=PaymentOperationStatus.SUBMITTED,
             idempotency_key=PayPalAdapter.idempotency_key(operation_id, PaymentOperationKind.CAPTURE),
             recipient_reference=parent.recipient_reference,
-            amount=amount,
+            amount=parent.amount,
             parent_operation_id=parent.operation_id,
             submitted_at=now,
         )
-        self._payments.save(operation)
+        operation, created = self._payments.create_if_absent(operation)
+        if not created:
+            return operation
         result = self._paypal.capture(
             operation_id=operation_id,
             authorization_reference=parent.provider_reference or "",
-            amount=amount,
+            amount=parent.amount,
         )
         completed = self._apply_result(operation, result)
         if completed.status is PaymentOperationStatus.SUCCEEDED:
@@ -310,7 +308,9 @@ class ApplicationService:
             parent_operation_id=parent.operation_id,
             submitted_at=now,
         )
-        self._payments.save(operation)
+        operation, created = self._payments.create_if_absent(operation)
+        if not created:
+            return operation
         result = self._paypal.void(
             operation_id=operation_id,
             authorization_reference=parent.provider_reference or "",
@@ -344,7 +344,9 @@ class ApplicationService:
             parent_operation_id=parent.operation_id,
             submitted_at=now,
         )
-        self._payments.save(operation)
+        operation, created = self._payments.create_if_absent(operation)
+        if not created:
+            return operation
         result = self._paypal.refund(
             operation_id=operation_id,
             capture_reference=parent.provider_reference or "",
@@ -392,7 +394,9 @@ class ApplicationService:
 
     def apply_replan(self, data: ApplyReplanInput) -> Plan:
         plan = self._require_plan(data.plan_id)
-        line_items, total = self._line_items_from_proposal(data.replacement.replacement, data.merchant_lookup)
+        if plan.head().confirmation_reference != data.confirmation_reference:
+            raise ApplicationError("replan confirmation_reference does not match the current plan version")
+        line_items, total, recipient = self._line_items_from_proposal(data.replacement.replacement, data.merchant_lookup)
         confirmation_reference = data.confirmation_reference
         correlation_id = data.correlation_id
         version_number = plan.current_version + 1
@@ -402,6 +406,7 @@ class ApplicationService:
             confirmation_reference=confirmation_reference,
             line_items=line_items,
             total=total,
+            payment_recipient_reference=recipient,
         )
         fingerprint = plan_version_fingerprint(payload)
         now = self._now()
@@ -414,6 +419,7 @@ class ApplicationService:
             correlation_id=correlation_id,
             line_items=line_items,
             total=total,
+            payment_recipient_reference=recipient,
             payload=payload,
         )
         plan.versions.append(new_version)
@@ -431,6 +437,8 @@ class ApplicationService:
         plan.updated_at = now
         self._plans.save(plan)
         self._revoke_prior_approvals(plan.plan_id, version_number)
+        if data.evidence:
+            self._evidence_reader.put(plan.plan_id, data.evidence)
         return plan
 
     # ------------------------------------------------------------------
@@ -489,7 +497,7 @@ class ApplicationService:
         self,
         proposal: BundleProposal,
         merchant_lookup: dict[str, str],
-    ) -> tuple[tuple[PlanLineItem, ...], Money]:
+    ) -> tuple[tuple[PlanLineItem, ...], Money, str]:
         if not proposal.line_items:
             raise ApplicationError("proposal has no line items")
         if proposal.cost_breakdown.all_in_total is None:
@@ -515,7 +523,10 @@ class ApplicationService:
             )
         total_source = proposal.cost_breakdown.all_in_total
         total = Money(amount_minor=total_source.amount_minor, currency=total_source.currency)
-        return tuple(items), total
+        recipients = {item.merchant_reference for item in items}
+        if len(recipients) != 1:
+            raise ApplicationError("multi-merchant plans require persisted merchant allocations before payment")
+        return tuple(items), total, recipients.pop()
 
 
 # ---------------------------------------------------------------------------
@@ -530,6 +541,7 @@ def _plan_version_payload(
     confirmation_reference: str,
     line_items: Iterable[PlanLineItem],
     total: Money,
+    payment_recipient_reference: str,
 ) -> dict[str, Any]:
     return {
         "plan_id": plan_id,
@@ -537,6 +549,7 @@ def _plan_version_payload(
         "confirmation_reference": confirmation_reference,
         "line_items": [item.model_dump(mode="json") for item in line_items],
         "total": total.model_dump(mode="json"),
+        "payment_recipient_reference": payment_recipient_reference,
     }
 
 

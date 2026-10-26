@@ -95,6 +95,10 @@ The interactive [Member 1 intelligence-boundary diagram](docs/architecture/membe
 
 `bundlegraph.replanning` turns a Member 2-supplied failed component into deterministic, non-authoritative replacement proposals. It reuses the bounded solver, preserves locked components and confirmed constraints, emits structured deltas and dependency subgraphs, and always marks material recovery proposals as requiring new approval. See [re-planning handoff](docs/member1/dependency-aware-replanning.md).
 
+## Deployment safety
+
+`BUNDLEGRAPH_MODE=demo` is the default and uses in-memory state with the fake PayPal client. Production mode fails closed until `DATABASE_URL`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_WEBHOOK_ID`, and `BUNDLEGRAPH_SANDBOX_RECIPIENTS` are present and real PostgreSQL, authentication, PayPal Orders, and webhook-verification adapters are wired. `/healthz` reports process liveness; `/readyz` reports whether those runtime dependencies are ready. The initial PostgreSQL schema is [001_member2_state.sql](migrations/001_member2_state.sql); apply it only through the deployment migration job.
+
 ## Member 2 application layer
 
 `bundlegraph_app` is the authoritative application layer: durable plan IDs and versions, approval binding by plan-version fingerprint, idempotent PayPal sandbox adapter (authorize/capture/void/refund), webhook deduplication, and a FastAPI boundary wiring Member 1's handlers. It is strictly outside the `bundlegraph` intelligence package and lives in `src/bundlegraph_app/`.

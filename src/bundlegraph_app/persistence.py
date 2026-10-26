@@ -71,6 +71,15 @@ class PaymentRepository:
         with self._store._lock:
             self._store._payments[operation.operation_id] = deepcopy(operation)
 
+    def create_if_absent(self, operation: PaymentOperation) -> tuple[PaymentOperation, bool]:
+        """Atomically claim an operation ID; durable adapters must enforce a unique key."""
+        with self._store._lock:
+            existing = self._store._payments.get(operation.operation_id)
+            if existing is not None:
+                return deepcopy(existing), False
+            self._store._payments[operation.operation_id] = deepcopy(operation)
+            return deepcopy(operation), True
+
     def get(self, operation_id: str) -> PaymentOperation | None:
         with self._store._lock:
             operation = self._store._payments.get(operation_id)
@@ -113,7 +122,10 @@ class EvidenceReader:
 
     def put(self, plan_id: str, evidence: tuple[Evidence, ...]) -> None:
         with self._store._lock:
-            self._store._plan_evidence[plan_id] = tuple(evidence)
+            existing = self._store._plan_evidence.get(plan_id, ())
+            merged = {record.evidence_id: record for record in existing}
+            merged.update({record.evidence_id: record for record in evidence})
+            self._store._plan_evidence[plan_id] = tuple(merged[evidence_id] for evidence_id in sorted(merged))
 
     def get_evidence_for_plan(self, plan_id: str) -> tuple[Evidence, ...] | None:
         with self._store._lock:
