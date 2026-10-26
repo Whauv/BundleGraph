@@ -71,6 +71,15 @@ class PaymentRepository:
         with self._store._lock:
             self._store._payments[operation.operation_id] = deepcopy(operation)
 
+    def create_if_absent(self, operation: PaymentOperation) -> tuple[PaymentOperation, bool]:
+        """Atomically claim an operation ID; durable adapters must enforce a unique key."""
+        with self._store._lock:
+            existing = self._store._payments.get(operation.operation_id)
+            if existing is not None:
+                return deepcopy(existing), False
+            self._store._payments[operation.operation_id] = deepcopy(operation)
+            return deepcopy(operation), True
+
     def get(self, operation_id: str) -> PaymentOperation | None:
         with self._store._lock:
             operation = self._store._payments.get(operation_id)

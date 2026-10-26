@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from bundlegraph.service import (
     SCHEMA_VERSION,
@@ -32,6 +32,7 @@ from .application import (
 )
 from .ids import new_id, plan_version_fingerprint  # noqa: F401 -- re-exported for client scripts
 from .planning import PlanningInputsRepository
+from .paypal import PayPalWebhookVerifier, RejectingWebhookVerifier
 from .state import Money, WebhookEvent
 
 
@@ -44,16 +45,17 @@ class SubmitApprovalBody(BaseModel):
 
 
 class AuthorizePaymentBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     approval_id: str = Field(min_length=1)
     operation_id: str = Field(min_length=1)
-    recipient_reference: str = Field(min_length=1)
-    amount: Money
 
 
 class CapturePaymentBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     parent_operation_id: str = Field(min_length=1)
     operation_id: str = Field(min_length=1)
-    amount: Money
 
 
 class VoidAuthorizationBody(BaseModel):
@@ -70,7 +72,6 @@ class RefundCaptureBody(BaseModel):
 class WebhookBody(BaseModel):
     event_id: str = Field(min_length=1)
     event_type: str = Field(min_length=1)
-    verified: bool
     resource_reference: str = Field(min_length=1)
     operation_id: str | None = None
     raw_payload_fingerprint: str = Field(min_length=16)
@@ -96,12 +97,14 @@ def build_app(
     service: ApplicationService,
     evidence_reader_adapter: Any,
     planning_inputs: PlanningInputsRepository,
+    webhook_verifier: PayPalWebhookVerifier | None = None,
 ) -> FastAPI:
     """Return a FastAPI application wired to the given authoritative service.
 
     ``evidence_reader_adapter`` must satisfy ``bundlegraph.service.BundlePlanEvidenceReader``.
     """
     app = FastAPI(title="BundleGraph Member 2 API", version="0.1.0")
+    verifier = webhook_verifier or RejectingWebhookVerifier()
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
@@ -181,8 +184,6 @@ def build_app(
             op = service.authorize_payment(
                 approval_id=body.approval_id,
                 operation_id=body.operation_id,
-                recipient_reference=body.recipient_reference,
-                amount=body.amount,
             )
         except ApplicationError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
@@ -194,7 +195,6 @@ def build_app(
             op = service.capture_payment(
                 parent_operation_id=body.parent_operation_id,
                 operation_id=body.operation_id,
-                amount=body.amount,
             )
         except ApplicationError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
@@ -225,11 +225,13 @@ def build_app(
 
     @app.post("/webhooks/paypal")
     def paypal_webhook(body: WebhookBody) -> dict[str, Any]:
+        payload = body.model_dump(mode="json")
+        verified = verifier.verify(payload)
         event = WebhookEvent(
             event_id=body.event_id,
             event_type=body.event_type,
             received_at=datetime.now(UTC),
-            verified=body.verified,
+            verified=verified,
             resource_reference=body.resource_reference,
             operation_id=body.operation_id,
             raw_payload_fingerprint=body.raw_payload_fingerprint,

@@ -231,35 +231,34 @@ def test_authorize_capture_executes_plan_and_is_idempotent():
     service, catalog, *_ = _wire_service()
     plan, approval, proposal = _approved(service, catalog)
     head = plan.head()
-    recipient = head.line_items[0].merchant_reference
     auth = service.authorize_payment(
         approval_id=approval.approval_id,
         operation_id="op-auth-happy",
-        recipient_reference=recipient,
-        amount=head.total,
     )
     assert auth.status is PaymentOperationStatus.SUCCEEDED
 
-    cap = service.capture_payment(parent_operation_id=auth.operation_id, operation_id="op-cap-happy", amount=head.total)
+    cap = service.capture_payment(parent_operation_id=auth.operation_id, operation_id="op-cap-happy")
     assert cap.status is PaymentOperationStatus.SUCCEEDED
 
     # Idempotency on repeated call.
-    cap_again = service.capture_payment(parent_operation_id=auth.operation_id, operation_id="op-cap-happy", amount=head.total)
+    cap_again = service.capture_payment(parent_operation_id=auth.operation_id, operation_id="op-cap-happy")
     assert cap_again.operation_id == cap.operation_id
     assert cap_again.provider_reference == cap.provider_reference
 
 
-def test_authorize_rejects_amount_above_permitted_total():
+def test_authorize_rejects_approval_total_that_differs_from_stored_plan():
     service, catalog, *_ = _wire_service()
-    plan, approval, _ = _approved(service, catalog)
+    proposal = _first_proposal(catalog)
+    plan = service.create_plan(CreatePlanInput("confirm-ap-1", "corr-1", proposal, _merchant_lookup(catalog)))
     head = plan.head()
-    too_much = Money(amount_minor=head.total.amount_minor + 1, currency=head.total.currency)
+    approval = service.submit_approval(SubmitApprovalInput(
+        plan_id=plan.plan_id, plan_version=head.version, plan_fingerprint=head.fingerprint,
+        actor_reference="user-123", permitted_total=Money(amount_minor=head.total.amount_minor + 1, currency=head.total.currency),
+    ))
     with pytest.raises(ApplicationError):
         service.authorize_payment(
             approval_id=approval.approval_id,
             operation_id="op-auth-over",
-            recipient_reference=head.line_items[0].merchant_reference,
-            amount=too_much,
         )
 
 
@@ -270,8 +269,6 @@ def test_void_after_authorize_succeeds():
     auth = service.authorize_payment(
         approval_id=approval.approval_id,
         operation_id="op-auth-void",
-        recipient_reference=head.line_items[0].merchant_reference,
-        amount=head.total,
     )
     void = service.void_authorization(parent_operation_id=auth.operation_id, operation_id="op-void")
     assert void.status is PaymentOperationStatus.SUCCEEDED
@@ -281,11 +278,10 @@ def test_refund_after_capture_succeeds():
     service, catalog, *_ = _wire_service()
     plan, approval, _ = _approved(service, catalog)
     head = plan.head()
-    recipient = head.line_items[0].merchant_reference
     auth = service.authorize_payment(
-        approval_id=approval.approval_id, operation_id="op-auth-ref", recipient_reference=recipient, amount=head.total,
+        approval_id=approval.approval_id, operation_id="op-auth-ref"
     )
-    cap = service.capture_payment(parent_operation_id=auth.operation_id, operation_id="op-cap-ref", amount=head.total)
+    cap = service.capture_payment(parent_operation_id=auth.operation_id, operation_id="op-cap-ref")
     refund_amount = Money(amount_minor=cap.amount.amount_minor // 2 or 1, currency=cap.amount.currency)
     refund = service.refund_capture(parent_operation_id=cap.operation_id, operation_id="op-ref", amount=refund_amount)
     assert refund.status is PaymentOperationStatus.SUCCEEDED
@@ -303,8 +299,6 @@ def test_duplicate_and_unverified_webhook_events_do_not_change_state():
     auth = service.authorize_payment(
         approval_id=approval.approval_id,
         operation_id="op-auth-wh",
-        recipient_reference=head.line_items[0].merchant_reference,
-        amount=head.total,
     )
     event = WebhookEvent(
         event_id="evt-1",

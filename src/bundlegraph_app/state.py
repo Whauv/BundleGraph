@@ -81,6 +81,7 @@ class PlanVersion(BaseModel):
     correlation_id: str = Field(min_length=1)
     line_items: tuple["PlanLineItem", ...] = Field(min_length=1)
     total: Money
+    payment_recipient_reference: str = Field(min_length=1)
     payload: dict[str, Any]
 
     @field_validator("created_at")

@@ -9,6 +9,7 @@ from bundlegraph_app.paypal import (
     PayPalAdapter,
     PayPalResultStatus,
     PayPalSandboxError,
+    RejectingWebhookVerifier,
 )
 from bundlegraph_app.state import Money, PaymentOperationKind
 
@@ -78,3 +79,7 @@ def test_injected_failure_is_cached_too():
     assert first.status is PayPalResultStatus.FAILED
     assert first.reason_code == "SANDBOX_SIMULATED_DECLINE"
     assert first == second  # replay-safe: same operation_id returns the same stored outcome
+
+
+def test_default_webhook_verifier_fails_closed():
+    assert RejectingWebhookVerifier().verify({"event_id": "untrusted"}) is False

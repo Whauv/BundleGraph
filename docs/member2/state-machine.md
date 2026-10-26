@@ -45,6 +45,10 @@ rejects a stale approval before any PayPal interaction happens.
 
 - Repeating `authorize_payment`/`capture_payment`/etc. with the same caller
   `operation_id` returns the stored record without calling PayPal again.
+- Authorization and capture use the stored plan-version total and stored recipient;
+  callers cannot provide either value. Partial capture is not supported in the
+  initial single-merchant payment path. Partial refunds remain supported up to
+  the captured amount and must be enforced transactionally by durable adapters.
 - A webhook event is applied only if it is `verified`, its `event_id` has not been
   recorded before, and the implied status transition is permitted. Out-of-order
   deliveries (e.g. `CAPTURE.PENDING` arriving after `CAPTURE.COMPLETED`) are

@@ -23,6 +23,12 @@ hosted environment.
 
 ## Live sandbox client (to-do, Nov 2–5)
 
+The current application deliberately does not enable a live client. PayPal's
+Payments v2 capture, void, and refund APIs operate on an existing authorization
+or capture ID; creating an authorization requires the separate Orders buyer-
+approval flow. Do not replace the fake client until that server-side flow,
+durable operation idempotency, and signature verification are configured.
+
 The production implementation calls `/v2/payments/authorizations`,
 `/v2/payments/captures`, and `/v2/payments/refunds` with:
 

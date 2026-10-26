@@ -3,6 +3,8 @@
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
+import pytest
 
 from bundlegraph.catalog import OFFLINE_FIXTURE_CATALOG
 from bundlegraph.models import (
@@ -15,7 +17,7 @@ from bundlegraph.models import (
     QuantityRequirement,
 )
 
-from bundlegraph_app.api import AuthoritativePlanningRequest, _generate_from_authoritative_inputs, build_app
+from bundlegraph_app.api import AuthoritativePlanningRequest, AuthorizePaymentBody, _generate_from_authoritative_inputs, build_app
 from bundlegraph_app.application import ApplicationService
 from bundlegraph_app.paypal import FakeSandboxClient, PayPalAdapter
 from bundlegraph_app.persistence import new_in_memory_repositories
@@ -94,6 +96,16 @@ def test_generation_resolves_confirmation_inputs_without_a_client_catalog():
     assert response.status.value == "ok"
     assert inputs.requirements.confirmation_reference == "confirm-api-1"
     assert response.result is not None and response.result.proposals
+
+
+def test_authorize_body_rejects_caller_supplied_recipient_and_amount():
+    with pytest.raises(ValidationError):
+        AuthorizePaymentBody(
+            approval_id="approval-1",
+            operation_id="operation-1",
+            recipient_reference="forged-recipient",
+            amount={"amount_minor": 999, "currency": "USD"},
+        )
 
 
 def test_healthz_reports_schema_version():
