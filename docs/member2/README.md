@@ -25,10 +25,9 @@ add compatibility, solver, or research logic.
 - **PayPal operation ids are the authoritative idempotency key.** The adapter builds
   `PayPal-Request-Id = bg-<kind>-<operation_id>`, so a replayed call to the service
   returns the stored result and never calls PayPal twice.
-- **Recipient references come from the server-side catalog only.** A caller supplies
-  only a confirmation reference; Member 2 resolves confirmed requirements and the
-  normalized catalog through `PlanningInputsRepository`. LLM output, browser content,
-  and HTTP catalog payloads never flow into a payment recipient.
+- **Recipient references come from the server-side catalog only.** LLM output or
+  browser content never flows into a payment recipient; the catalog embedded in the
+  request is the only source for `merchant_reference`.
 - **Terminal statuses are terminal.** `SUCCEEDED`/`FAILED` operations and `EXECUTED`
   plans cannot be re-opened; the state transition table in `state.py` enforces this.
 - **Replan always invalidates.** `apply_replan` writes a new version and marks every
@@ -46,12 +45,6 @@ With no PayPal credentials, the deployment uses the deterministic in-process
 sandbox and the in-memory repositories. Replace both with the production adapter
 and PostgreSQL-backed repositories for a hosted deploy; the interfaces are the
 same.
-
-The local planning-input repository starts empty and fails closed. A demo or
-integration test must register an `AuthoritativePlanningInputs` record under an
-existing confirmation reference before calling the generate, plan, or replan routes.
-The selected proposal's referenced evidence is persisted through the Member 2
-`EvidenceReader`, so Member 3 can retrieve it through the evidence route.
 
 ## Tests
 

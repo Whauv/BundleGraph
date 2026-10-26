@@ -108,7 +108,7 @@ def _wire_service():
         paypal=adapter,
         now=lambda: datetime(2026, 10, 25, 12, 0, tzinfo=UTC),
     )
-    return service, catalog, plans, approvals, payments, webhooks, client, evidence_reader
+    return service, catalog, plans, approvals, payments, webhooks, client
 
 
 # ---------------------------------------------------------------------------
@@ -131,25 +131,6 @@ def test_create_plan_sets_fingerprint_and_moves_to_proposed():
     assert plan.current_version == 1
     assert plan.head().fingerprint
     assert plan.head().total.currency == "USD"
-
-
-def test_selected_proposal_evidence_is_persisted_through_member_two_reader():
-    service, catalog, *_, evidence_reader = _wire_service()
-    proposal = _first_proposal(catalog)
-    records = {record.evidence_id: record for record in catalog.evidence}
-    selected_evidence = tuple(records[evidence_id] for evidence_id in proposal.evidence_references)
-    plan = service.create_plan(
-        CreatePlanInput(
-            confirmation_reference="confirm-ap-1",
-            correlation_id="corr-evidence",
-            proposal=proposal,
-            merchant_lookup=_merchant_lookup(catalog),
-            evidence=selected_evidence,
-        )
-    )
-    stored = evidence_reader.get_evidence_for_plan(plan.plan_id)
-    assert stored is not None
-    assert {record.evidence_id for record in stored} == set(proposal.evidence_references)
 
 
 def test_approval_rejects_mismatched_fingerprint():
