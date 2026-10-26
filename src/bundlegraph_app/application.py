@@ -69,6 +69,7 @@ class ApplyReplanInput:
     confirmation_reference: str
     correlation_id: str
     merchant_lookup: dict[str, str]
+    evidence: tuple[Evidence, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -392,6 +393,8 @@ class ApplicationService:
 
     def apply_replan(self, data: ApplyReplanInput) -> Plan:
         plan = self._require_plan(data.plan_id)
+        if plan.head().confirmation_reference != data.confirmation_reference:
+            raise ApplicationError("replan confirmation_reference does not match the current plan version")
         line_items, total = self._line_items_from_proposal(data.replacement.replacement, data.merchant_lookup)
         confirmation_reference = data.confirmation_reference
         correlation_id = data.correlation_id
@@ -431,6 +434,8 @@ class ApplicationService:
         plan.updated_at = now
         self._plans.save(plan)
         self._revoke_prior_approvals(plan.plan_id, version_number)
+        if data.evidence:
+            self._evidence_reader.put(plan.plan_id, data.evidence)
         return plan
 
     # ------------------------------------------------------------------

@@ -113,7 +113,10 @@ class EvidenceReader:
 
     def put(self, plan_id: str, evidence: tuple[Evidence, ...]) -> None:
         with self._store._lock:
-            self._store._plan_evidence[plan_id] = tuple(evidence)
+            existing = self._store._plan_evidence.get(plan_id, ())
+            merged = {record.evidence_id: record for record in existing}
+            merged.update({record.evidence_id: record for record in evidence})
+            self._store._plan_evidence[plan_id] = tuple(merged[evidence_id] for evidence_id in sorted(merged))
 
     def get_evidence_for_plan(self, plan_id: str) -> tuple[Evidence, ...] | None:
         with self._store._lock:

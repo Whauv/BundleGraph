@@ -45,7 +45,10 @@ Represents user-reviewed constraints supplied through Member 2.
 | `laptop_ports` | array | Required known ports |
 | `deadline` | date-time or null | Constraint only |
 
-The existing `ConfirmedRequirements` model is a preliminary local representation. It lacks `request_reference`, `confirmation_reference`, and required-category quantities, so it must be adapted only after team review.
+The local `ConfirmedRequirements` model includes `request_reference`,
+`confirmation_reference`, and required-category quantities. Member 2 remains
+authoritative for resolving the reference to this immutable confirmed record before
+calling Member 1; it must not treat a client-supplied copy as authoritative.
 
 ## Product and MerchantOffer
 
