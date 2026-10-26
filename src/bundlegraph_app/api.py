@@ -98,6 +98,7 @@ def build_app(
     evidence_reader_adapter: Any,
     planning_inputs: PlanningInputsRepository,
     webhook_verifier: PayPalWebhookVerifier | None = None,
+    readiness: dict[str, bool] | None = None,
 ) -> FastAPI:
     """Return a FastAPI application wired to the given authoritative service.
 
@@ -105,10 +106,16 @@ def build_app(
     """
     app = FastAPI(title="BundleGraph Member 2 API", version="0.1.0")
     verifier = webhook_verifier or RejectingWebhookVerifier()
+    readiness_checks = readiness or {"persistence": False, "authentication": False, "paypal": False, "webhook_verifier": False}
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok", "schema_version": "1.0"}
+
+    @app.get("/readyz")
+    def readyz() -> dict[str, Any]:
+        ready = all(readiness_checks.values())
+        return {"status": "ready" if ready else "not_ready", "checks": readiness_checks}
 
     @app.post("/bundle-plans/generate")
     def generate_bundle_plans(body: AuthoritativePlanningRequest) -> dict[str, Any]:
