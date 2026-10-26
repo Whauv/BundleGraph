@@ -12,6 +12,7 @@ from .api import build_app
 from .application import ApplicationService
 from .paypal import FakeSandboxClient, PayPalAdapter
 from .persistence import new_in_memory_repositories
+from .planning import PlanningInputsRepository
 
 
 def _build() -> "FastAPI":  # noqa: F821 -- forward reference for lazy FastAPI import
@@ -28,7 +29,10 @@ def _build() -> "FastAPI":  # noqa: F821 -- forward reference for lazy FastAPI i
         evidence_reader=evidence_reader,
         paypal=adapter,
     )
-    return build_app(service, evidence_reader)
+    # A real deployment injects a durable confirmation/catalog repository during
+    # startup.  The empty local repository deliberately fails closed until an
+    # authoritative confirmation has been registered.
+    return build_app(service, evidence_reader, PlanningInputsRepository())
 
 
 app = _build()

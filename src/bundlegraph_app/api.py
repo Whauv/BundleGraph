@@ -11,14 +11,17 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
 from bundlegraph.service import (
+    SCHEMA_VERSION,
     GenerateBundlePlansRequest,
     ServiceStatus,
     handle_generate_bundle_plans,
     handle_get_bundle_plan_evidence,
 )
+from bundlegraph.replanning import ReplacementBundleProposal
+from bundlegraph.selection import BundleSelectionRequest
 
 from .application import (
     ApplicationError,
@@ -28,6 +31,7 @@ from .application import (
     SubmitApprovalInput,
 )
 from .ids import new_id, plan_version_fingerprint  # noqa: F401 -- re-exported for client scripts
+from .planning import PlanningInputsRepository
 from .state import Money, WebhookEvent
 
 
@@ -72,7 +76,27 @@ class WebhookBody(BaseModel):
     raw_payload_fingerprint: str = Field(min_length=16)
 
 
-def build_app(service: ApplicationService, evidence_reader_adapter: Any) -> FastAPI:
+class AuthoritativePlanningRequest(BaseModel):
+    """A caller may identify a confirmed request, but cannot supply its contents."""
+
+    schema_version: str
+    correlation_id: str = Field(min_length=1)
+    confirmation_reference: str = Field(min_length=1)
+
+
+class CreatePlanBody(AuthoritativePlanningRequest):
+    proposal_key: str | None = Field(default=None, min_length=1)
+
+
+class ApplyReplanBody(AuthoritativePlanningRequest):
+    replacement: ReplacementBundleProposal
+
+
+def build_app(
+    service: ApplicationService,
+    evidence_reader_adapter: Any,
+    planning_inputs: PlanningInputsRepository,
+) -> FastAPI:
     """Return a FastAPI application wired to the given authoritative service.
 
     ``evidence_reader_adapter`` must satisfy ``bundlegraph.service.BundlePlanEvidenceReader``.
@@ -84,8 +108,8 @@ def build_app(service: ApplicationService, evidence_reader_adapter: Any) -> Fast
         return {"status": "ok", "schema_version": "1.0"}
 
     @app.post("/bundle-plans/generate")
-    def generate_bundle_plans(raw: dict[str, Any]) -> dict[str, Any]:
-        response = handle_generate_bundle_plans(raw)
+    def generate_bundle_plans(body: AuthoritativePlanningRequest) -> dict[str, Any]:
+        response, _ = _generate_from_authoritative_inputs(body, planning_inputs)
         return response.model_dump(mode="json")
 
     @app.get("/bundle-plans/{plan_id}/evidence")
@@ -95,24 +119,40 @@ def build_app(service: ApplicationService, evidence_reader_adapter: Any) -> Fast
         return response.model_dump(mode="json")
 
     @app.post("/plans")
-    def create_plan(payload: dict[str, Any]) -> dict[str, Any]:
-        # Validate the Member 1 envelope first so we can embed the proposal verbatim.
-        try:
-            request = GenerateBundlePlansRequest.model_validate(payload["selection_request"])
-        except (KeyError, ValidationError) as exc:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid selection_request") from exc
-        service_response = handle_generate_bundle_plans(payload["selection_request"])
+    def create_plan(body: CreatePlanBody) -> dict[str, Any]:
+        service_response, inputs = _generate_from_authoritative_inputs(body, planning_inputs)
         if service_response.status is not ServiceStatus.OK or service_response.result is None or not service_response.result.proposals:
             return {"status": service_response.status.value, "reason_codes": list(service_response.reason_codes)}
-        chosen = service_response.result.proposals[0]
-        merchant_lookup = _merchant_lookup_from_payload(payload, chosen)
+        chosen = _choose_proposal(service_response.result.proposals, body.proposal_key)
+        evidence = _proposal_evidence(chosen.evidence_references, inputs.catalog.evidence)
         try:
             plan = service.create_plan(
                 CreatePlanInput(
-                    confirmation_reference=request.selection.requirements.confirmation_reference,
-                    correlation_id=request.correlation_id,
+                    confirmation_reference=body.confirmation_reference,
+                    correlation_id=body.correlation_id,
                     proposal=chosen,
-                    merchant_lookup=merchant_lookup,
+                    merchant_lookup=inputs.merchant_lookup(),
+                    evidence=evidence,
+                )
+            )
+        except ApplicationError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+        return {"plan": plan.model_dump(mode="json")}
+
+    @app.post("/plans/{plan_id}/replans")
+    def apply_replan(plan_id: str, body: ApplyReplanBody) -> dict[str, Any]:
+        inputs = _require_planning_inputs(body.confirmation_reference, planning_inputs)
+        replacement = body.replacement.replacement
+        evidence = _proposal_evidence(replacement.evidence_references, inputs.catalog.evidence)
+        try:
+            plan = service.apply_replan(
+                ApplyReplanInput(
+                    plan_id=plan_id,
+                    replacement=body.replacement,
+                    confirmation_reference=body.confirmation_reference,
+                    correlation_id=body.correlation_id,
+                    merchant_lookup=inputs.merchant_lookup(),
+                    evidence=evidence,
                 )
             )
         except ApplicationError as exc:
@@ -200,21 +240,55 @@ def build_app(service: ApplicationService, evidence_reader_adapter: Any) -> Fast
     return app
 
 
-def _merchant_lookup_from_payload(payload: dict[str, Any], proposal: Any) -> dict[str, str]:
-    """Build offer_id → merchant_reference from the catalog embedded in the request.
+def _require_planning_inputs(
+    confirmation_reference: str,
+    planning_inputs: PlanningInputsRepository,
+) -> Any:
+    inputs = planning_inputs.get(confirmation_reference)
+    if inputs is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"confirmation_reference {confirmation_reference!r} was not found",
+        )
+    return inputs
 
-    The authoritative recipient must come from the server-side catalog, not from an
-    LLM response or an untrusted client body. We re-read ``selection_request.selection.catalog``.
-    """
-    lookup: dict[str, str] = {}
-    catalog = payload.get("selection_request", {}).get("selection", {}).get("catalog", {})
-    offers = catalog.get("offers", ())
-    for offer in offers:
-        lookup[offer["offer_id"]] = offer["merchant_reference"]
-    missing = [item.offer_id for item in proposal.line_items if item.offer_id not in lookup]
+
+def _generate_from_authoritative_inputs(
+    body: AuthoritativePlanningRequest,
+    planning_inputs: PlanningInputsRepository,
+) -> tuple[Any, Any]:
+    if body.schema_version != SCHEMA_VERSION:
+        response = handle_generate_bundle_plans(
+            {"schema_version": body.schema_version, "correlation_id": body.correlation_id},
+        )
+        return response, None
+    inputs = _require_planning_inputs(body.confirmation_reference, planning_inputs)
+    request = GenerateBundlePlansRequest(
+        schema_version=SCHEMA_VERSION,
+        correlation_id=body.correlation_id,
+        selection=BundleSelectionRequest(
+            requirements=inputs.requirements,
+            catalog=inputs.catalog,
+        ),
+    )
+    return handle_generate_bundle_plans(request.model_dump(mode="json")), inputs
+
+
+def _choose_proposal(proposals: tuple[Any, ...], proposal_key: str | None) -> Any:
+    if proposal_key is None:
+        return proposals[0]
+    for proposal in proposals:
+        if proposal.proposal_key == proposal_key:
+            return proposal
+    raise HTTPException(status.HTTP_404_NOT_FOUND, f"proposal_key {proposal_key!r} was not generated")
+
+
+def _proposal_evidence(evidence_ids: tuple[str, ...], catalog_evidence: tuple[Any, ...]) -> tuple[Any, ...]:
+    by_id = {record.evidence_id: record for record in catalog_evidence}
+    missing = sorted(set(evidence_ids) - set(by_id))
     if missing:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            f"catalog in request is missing merchant_reference for offers: {missing}",
+            f"authoritative catalog is missing proposal evidence: {missing}",
         )
-    return lookup
+    return tuple(by_id[evidence_id] for evidence_id in sorted(set(evidence_ids)))
