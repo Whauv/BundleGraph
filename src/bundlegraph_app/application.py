@@ -21,7 +21,7 @@ from typing import Any, Callable, Iterable
 
 from bundlegraph.models import Evidence
 from bundlegraph.replanning import ReplacementBundleProposal
-from bundlegraph.selection import BundleProposal
+from bundlegraph.selection import BundleProposal, TotalStatus
 
 from .ids import new_id, plan_version_fingerprint
 from .paypal import PayPalAdapter, PayPalResult, PayPalResultStatus
@@ -36,6 +36,7 @@ from .state import (
     Approval,
     ApprovalStatus,
     Money,
+    MerchantAllocation,
     PaymentOperation,
     PaymentOperationKind,
     PaymentOperationStatus,
@@ -106,7 +107,7 @@ class ApplicationService:
     # ------------------------------------------------------------------
 
     def create_plan(self, data: CreatePlanInput) -> Plan:
-        line_items, total, recipient = self._line_items_from_proposal(data.proposal, data.merchant_lookup)
+        line_items, total, allocations = self._line_items_from_proposal(data.proposal, data.merchant_lookup)
         plan_id = new_id("plan")
         version_payload = _plan_version_payload(
             plan_id=plan_id,
@@ -114,7 +115,7 @@ class ApplicationService:
             confirmation_reference=data.confirmation_reference,
             line_items=line_items,
             total=total,
-            payment_recipient_reference=recipient,
+            merchant_allocations=allocations,
         )
         fingerprint = plan_version_fingerprint(version_payload)
         now = self._now()
@@ -127,7 +128,7 @@ class ApplicationService:
             correlation_id=data.correlation_id,
             line_items=line_items,
             total=total,
-            payment_recipient_reference=recipient,
+            merchant_allocations=allocations,
             payload=version_payload,
         )
         plan = Plan(
@@ -207,10 +208,11 @@ class ApplicationService:
         *,
         approval_id: str,
         operation_id: str,
+        merchant_allocation_id: str,
     ) -> PaymentOperation:
         existing = self._payments.get(operation_id)
         if existing is not None:
-            return existing
+            return self.reconcile_payment(operation_id)
         approval = self._require_granted_approval(approval_id)
         plan = self._require_plan(approval.plan_id)
         head = plan.head()
@@ -218,6 +220,20 @@ class ApplicationService:
             raise ApplicationError("approval no longer matches the current plan version")
         if head.total != approval.permitted_total:
             raise ApplicationError("approval total no longer matches the stored plan total")
+        allocation = next(
+            (item for item in head.merchant_allocations if item.allocation_id == merchant_allocation_id),
+            None,
+        )
+        if allocation is None:
+            raise ApplicationError("merchant_allocation_id does not belong to the current plan version")
+        if any(
+            item.plan_version == head.version
+            and item.kind is PaymentOperationKind.AUTHORIZE
+            and item.merchant_allocation_id == allocation.allocation_id
+            and item.status in {PaymentOperationStatus.SUBMITTED, PaymentOperationStatus.UNCERTAIN, PaymentOperationStatus.SUCCEEDED}
+            for item in self._payments.list_for_plan(plan.plan_id)
+        ):
+            raise ApplicationError("merchant allocation already has an active or successful authorization")
         now = self._now()
         operation = PaymentOperation(
             operation_id=operation_id,
@@ -227,8 +243,9 @@ class ApplicationService:
             kind=PaymentOperationKind.AUTHORIZE,
             status=PaymentOperationStatus.SUBMITTED,
             idempotency_key=PayPalAdapter.idempotency_key(operation_id, PaymentOperationKind.AUTHORIZE),
-            recipient_reference=head.payment_recipient_reference,
-            amount=head.total,
+            recipient_reference=allocation.merchant_reference,
+            amount=allocation.amount,
+            merchant_allocation_id=allocation.allocation_id,
             submitted_at=now,
         )
         operation, created = self._payments.create_if_absent(operation)
@@ -241,8 +258,8 @@ class ApplicationService:
             self._plans.save(plan)
         result = self._paypal.authorize(
             operation_id=operation_id,
-            recipient_reference=head.payment_recipient_reference,
-            amount=head.total,
+            recipient_reference=allocation.merchant_reference,
+            amount=allocation.amount,
         )
         return self._apply_result(operation, result)
 
@@ -254,9 +271,16 @@ class ApplicationService:
     ) -> PaymentOperation:
         existing = self._payments.get(operation_id)
         if existing is not None:
-            return existing
+            return self.reconcile_payment(operation_id)
         parent = self._require_succeeded_authorization(parent_operation_id)
         approval = self._require_granted_approval(parent.approval_id)
+        if any(
+            item.kind is PaymentOperationKind.CAPTURE
+            and item.parent_operation_id == parent.operation_id
+            and item.status in {PaymentOperationStatus.SUBMITTED, PaymentOperationStatus.UNCERTAIN, PaymentOperationStatus.SUCCEEDED}
+            for item in self._payments.list_for_plan(parent.plan_id)
+        ):
+            raise ApplicationError("authorization already has an active or successful capture")
         now = self._now()
         operation = PaymentOperation(
             operation_id=operation_id,
@@ -268,6 +292,7 @@ class ApplicationService:
             idempotency_key=PayPalAdapter.idempotency_key(operation_id, PaymentOperationKind.CAPTURE),
             recipient_reference=parent.recipient_reference,
             amount=parent.amount,
+            merchant_allocation_id=parent.merchant_allocation_id,
             parent_operation_id=parent.operation_id,
             submitted_at=now,
         )
@@ -282,7 +307,7 @@ class ApplicationService:
         completed = self._apply_result(operation, result)
         if completed.status is PaymentOperationStatus.SUCCEEDED:
             plan = self._require_plan(parent.plan_id)
-            if plan.status is PlanStatus.EXECUTING:
+            if plan.status is PlanStatus.EXECUTING and self._all_allocations_captured(plan):
                 ensure_plan_transition(plan.status, PlanStatus.EXECUTED)
                 plan.status = PlanStatus.EXECUTED
                 plan.updated_at = now
@@ -292,7 +317,7 @@ class ApplicationService:
     def void_authorization(self, *, parent_operation_id: str, operation_id: str) -> PaymentOperation:
         existing = self._payments.get(operation_id)
         if existing is not None:
-            return existing
+            return self.reconcile_payment(operation_id)
         parent = self._require_succeeded_authorization(parent_operation_id)
         now = self._now()
         operation = PaymentOperation(
@@ -305,6 +330,7 @@ class ApplicationService:
             idempotency_key=PayPalAdapter.idempotency_key(operation_id, PaymentOperationKind.VOID),
             recipient_reference=parent.recipient_reference,
             amount=parent.amount,
+            merchant_allocation_id=parent.merchant_allocation_id,
             parent_operation_id=parent.operation_id,
             submitted_at=now,
         )
@@ -326,10 +352,19 @@ class ApplicationService:
     ) -> PaymentOperation:
         existing = self._payments.get(operation_id)
         if existing is not None:
-            return existing
+            return self.reconcile_payment(operation_id)
         parent = self._require_succeeded_capture(parent_operation_id)
         if amount.currency != parent.amount.currency or amount.amount_minor > parent.amount.amount_minor:
             raise ApplicationError("refund amount is not consistent with the capture")
+        reserved_refunds = sum(
+            item.amount.amount_minor
+            for item in self._payments.list_for_plan(parent.plan_id)
+            if item.kind is PaymentOperationKind.REFUND
+            and item.parent_operation_id == parent.operation_id
+            and item.status in {PaymentOperationStatus.SUBMITTED, PaymentOperationStatus.UNCERTAIN, PaymentOperationStatus.SUCCEEDED}
+        )
+        if reserved_refunds + amount.amount_minor > parent.amount.amount_minor:
+            raise ApplicationError("refund amount exceeds the remaining captured amount")
         now = self._now()
         operation = PaymentOperation(
             operation_id=operation_id,
@@ -341,6 +376,7 @@ class ApplicationService:
             idempotency_key=PayPalAdapter.idempotency_key(operation_id, PaymentOperationKind.REFUND),
             recipient_reference=parent.recipient_reference,
             amount=amount,
+            merchant_allocation_id=parent.merchant_allocation_id,
             parent_operation_id=parent.operation_id,
             submitted_at=now,
         )
@@ -357,6 +393,16 @@ class ApplicationService:
     # ------------------------------------------------------------------
     # Webhooks and reconciliation
     # ------------------------------------------------------------------
+
+    def reconcile_payment(self, operation_id: str) -> PaymentOperation:
+        """Resolve a persisted submitted/uncertain operation without creating a new one."""
+        operation = self._payments.get(operation_id)
+        if operation is None:
+            raise ApplicationError(f"payment operation {operation_id} not found")
+        if operation.status not in {PaymentOperationStatus.SUBMITTED, PaymentOperationStatus.UNCERTAIN}:
+            return operation
+        result = self._paypal.reconcile(operation_id=operation.operation_id, kind=operation.kind)
+        return operation if result is None else self._apply_result(operation, result)
 
     def record_webhook_event(self, event: WebhookEvent) -> bool:
         """Return True if this event advanced state; False if duplicate or unknown."""
@@ -396,7 +442,7 @@ class ApplicationService:
         plan = self._require_plan(data.plan_id)
         if plan.head().confirmation_reference != data.confirmation_reference:
             raise ApplicationError("replan confirmation_reference does not match the current plan version")
-        line_items, total, recipient = self._line_items_from_proposal(data.replacement.replacement, data.merchant_lookup)
+        line_items, total, allocations = self._line_items_from_proposal(data.replacement.replacement, data.merchant_lookup)
         confirmation_reference = data.confirmation_reference
         correlation_id = data.correlation_id
         version_number = plan.current_version + 1
@@ -406,7 +452,7 @@ class ApplicationService:
             confirmation_reference=confirmation_reference,
             line_items=line_items,
             total=total,
-            payment_recipient_reference=recipient,
+            merchant_allocations=allocations,
         )
         fingerprint = plan_version_fingerprint(payload)
         now = self._now()
@@ -419,7 +465,7 @@ class ApplicationService:
             correlation_id=correlation_id,
             line_items=line_items,
             total=total,
-            payment_recipient_reference=recipient,
+            merchant_allocations=allocations,
             payload=payload,
         )
         plan.versions.append(new_version)
@@ -479,6 +525,16 @@ class ApplicationService:
             raise ApplicationError(f"capture {operation_id} is {operation.status}")
         return operation
 
+    def _all_allocations_captured(self, plan: Plan) -> bool:
+        captured = {
+            operation.merchant_allocation_id
+            for operation in self._payments.list_for_plan(plan.plan_id)
+            if operation.plan_version == plan.current_version
+            and operation.kind is PaymentOperationKind.CAPTURE
+            and operation.status is PaymentOperationStatus.SUCCEEDED
+        }
+        return {allocation.allocation_id for allocation in plan.head().merchant_allocations}.issubset(captured)
+
     def _apply_result(self, operation: PaymentOperation, result: PayPalResult) -> PaymentOperation:
         target = _result_to_status(result.status)
         try:
@@ -497,7 +553,7 @@ class ApplicationService:
         self,
         proposal: BundleProposal,
         merchant_lookup: dict[str, str],
-    ) -> tuple[tuple[PlanLineItem, ...], Money, str]:
+    ) -> tuple[tuple[PlanLineItem, ...], Money, tuple[MerchantAllocation, ...]]:
         if not proposal.line_items:
             raise ApplicationError("proposal has no line items")
         if proposal.cost_breakdown.all_in_total is None:
@@ -523,10 +579,39 @@ class ApplicationService:
             )
         total_source = proposal.cost_breakdown.all_in_total
         total = Money(amount_minor=total_source.amount_minor, currency=total_source.currency)
-        recipients = {item.merchant_reference for item in items}
-        if len(recipients) != 1:
-            raise ApplicationError("multi-merchant plans require persisted merchant allocations before payment")
-        return tuple(items), total, recipients.pop()
+        by_merchant: dict[str, list[tuple[PlanLineItem, Any]]] = {}
+        for item, source in zip(items, proposal.line_items, strict=True):
+            by_merchant.setdefault(item.merchant_reference, []).append((item, source))
+        if len(by_merchant) == 1:
+            merchant_reference, merchant_items = next(iter(by_merchant.items()))
+            return tuple(items), total, (
+                MerchantAllocation(
+                    allocation_id="allocation-001",
+                    merchant_reference=merchant_reference,
+                    amount=total,
+                    offer_ids=tuple(sorted(item.offer_id for item, _ in merchant_items)),
+                ),
+            )
+        if proposal.cost_breakdown.total_status is not TotalStatus.VERIFIED_ALL_IN:
+            raise ApplicationError("multi-merchant payment requires verified per-line shipping and tax; a bounded allowance cannot be allocated safely")
+        allocations: list[MerchantAllocation] = []
+        for position, merchant_reference in enumerate(sorted(by_merchant), start=1):
+            merchant_items = by_merchant[merchant_reference]
+            amount_minor = sum(
+                item.unit_price.amount_minor * item.quantity
+                + source.shipping.amount_minor
+                + source.tax.amount_minor
+                for item, source in merchant_items
+            )
+            allocations.append(MerchantAllocation(
+                allocation_id=f"allocation-{position:03d}",
+                merchant_reference=merchant_reference,
+                amount=Money(amount_minor=amount_minor, currency=total.currency),
+                offer_ids=tuple(sorted(item.offer_id for item, _ in merchant_items)),
+            ))
+        if sum(item.amount.amount_minor for item in allocations) != total.amount_minor:
+            raise ApplicationError("merchant allocations do not equal the persisted all-in plan total")
+        return tuple(items), total, tuple(allocations)
 
 
 # ---------------------------------------------------------------------------
@@ -541,7 +626,7 @@ def _plan_version_payload(
     confirmation_reference: str,
     line_items: Iterable[PlanLineItem],
     total: Money,
-    payment_recipient_reference: str,
+    merchant_allocations: Iterable[MerchantAllocation],
 ) -> dict[str, Any]:
     return {
         "plan_id": plan_id,
@@ -549,7 +634,7 @@ def _plan_version_payload(
         "confirmation_reference": confirmation_reference,
         "line_items": [item.model_dump(mode="json") for item in line_items],
         "total": total.model_dump(mode="json"),
-        "payment_recipient_reference": payment_recipient_reference,
+        "merchant_allocations": [item.model_dump(mode="json") for item in merchant_allocations],
     }
 
 

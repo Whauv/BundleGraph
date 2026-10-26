@@ -97,7 +97,7 @@ def _wire_service():
     plans, approvals, payments, webhooks, evidence_reader = new_in_memory_repositories()
     client = FakeSandboxClient(now_factory=lambda: datetime(2026, 10, 25, 12, 0, tzinfo=UTC))
     catalog = _available_catalog()
-    sandbox = frozenset(offer.merchant_reference for offer in catalog.offers)
+    sandbox = frozenset({*(offer.merchant_reference for offer in catalog.offers), "merchant-a", "merchant-b"})
     adapter = PayPalAdapter(client, sandbox)
     service = ApplicationService(
         plans=plans,
@@ -227,6 +227,10 @@ def _approved(service, catalog):
     return plan, approval, proposal
 
 
+def _allocation_id(plan):
+    return plan.head().merchant_allocations[0].allocation_id
+
+
 def test_authorize_capture_executes_plan_and_is_idempotent():
     service, catalog, *_ = _wire_service()
     plan, approval, proposal = _approved(service, catalog)
@@ -234,6 +238,7 @@ def test_authorize_capture_executes_plan_and_is_idempotent():
     auth = service.authorize_payment(
         approval_id=approval.approval_id,
         operation_id="op-auth-happy",
+        merchant_allocation_id=_allocation_id(plan),
     )
     assert auth.status is PaymentOperationStatus.SUCCEEDED
 
@@ -244,6 +249,59 @@ def test_authorize_capture_executes_plan_and_is_idempotent():
     cap_again = service.capture_payment(parent_operation_id=auth.operation_id, operation_id="op-cap-happy")
     assert cap_again.operation_id == cap.operation_id
     assert cap_again.provider_reference == cap.provider_reference
+
+
+def test_multi_merchant_allocations_are_persisted_and_all_must_capture():
+    service, catalog, plans, *_ = _wire_service()
+    proposal = _first_proposal(catalog)
+    lookup = _merchant_lookup(catalog)
+    lookup[proposal.line_items[0].offer_id] = "merchant-a"
+    lookup[proposal.line_items[1].offer_id] = "merchant-b"
+    plan = service.create_plan(CreatePlanInput("confirm-ap-1", "corr-multi", proposal, lookup))
+    head = plan.head()
+    assert len(head.merchant_allocations) >= 2
+    assert sum(item.amount.amount_minor for item in head.merchant_allocations) == head.total.amount_minor
+    approval = service.submit_approval(SubmitApprovalInput(
+        plan_id=plan.plan_id, plan_version=head.version, plan_fingerprint=head.fingerprint,
+        actor_reference="user-123", permitted_total=head.total,
+    ))
+    first = head.merchant_allocations[0]
+    auth = service.authorize_payment(
+        approval_id=approval.approval_id, operation_id="op-auth-multi-a", merchant_allocation_id=first.allocation_id,
+    )
+    service.capture_payment(parent_operation_id=auth.operation_id, operation_id="op-cap-multi-a")
+    assert plans.get(plan.plan_id).status is PlanStatus.EXECUTING
+    for position, allocation in enumerate(head.merchant_allocations[1:], start=2):
+        next_auth = service.authorize_payment(
+            approval_id=approval.approval_id, operation_id=f"op-auth-multi-{position}", merchant_allocation_id=allocation.allocation_id,
+        )
+        service.capture_payment(parent_operation_id=next_auth.operation_id, operation_id=f"op-cap-multi-{position}")
+    assert plans.get(plan.plan_id).status is PlanStatus.EXECUTED
+
+
+def test_authorize_rejects_unknown_stored_allocation_id():
+    service, catalog, *_ = _wire_service()
+    plan, approval, _ = _approved(service, catalog)
+    with pytest.raises(ApplicationError, match="merchant_allocation_id"):
+        service.authorize_payment(
+            approval_id=approval.approval_id, operation_id="op-auth-unknown-allocation", merchant_allocation_id="allocation-forged",
+        )
+
+
+def test_allocation_cannot_be_authorized_or_captured_twice():
+    service, catalog, *_ = _wire_service()
+    plan, approval, _ = _approved(service, catalog)
+    allocation_id = _allocation_id(plan)
+    auth = service.authorize_payment(
+        approval_id=approval.approval_id, operation_id="op-auth-once", merchant_allocation_id=allocation_id,
+    )
+    with pytest.raises(ApplicationError, match="already has an active"):
+        service.authorize_payment(
+            approval_id=approval.approval_id, operation_id="op-auth-again", merchant_allocation_id=allocation_id,
+        )
+    service.capture_payment(parent_operation_id=auth.operation_id, operation_id="op-cap-once")
+    with pytest.raises(ApplicationError, match="already has an active"):
+        service.capture_payment(parent_operation_id=auth.operation_id, operation_id="op-cap-again")
 
 
 def test_authorize_rejects_approval_total_that_differs_from_stored_plan():
@@ -259,6 +317,7 @@ def test_authorize_rejects_approval_total_that_differs_from_stored_plan():
         service.authorize_payment(
             approval_id=approval.approval_id,
             operation_id="op-auth-over",
+            merchant_allocation_id=_allocation_id(plan),
         )
 
 
@@ -269,6 +328,7 @@ def test_void_after_authorize_succeeds():
     auth = service.authorize_payment(
         approval_id=approval.approval_id,
         operation_id="op-auth-void",
+        merchant_allocation_id=_allocation_id(plan),
     )
     void = service.void_authorization(parent_operation_id=auth.operation_id, operation_id="op-void")
     assert void.status is PaymentOperationStatus.SUCCEEDED
@@ -279,7 +339,7 @@ def test_refund_after_capture_succeeds():
     plan, approval, _ = _approved(service, catalog)
     head = plan.head()
     auth = service.authorize_payment(
-        approval_id=approval.approval_id, operation_id="op-auth-ref"
+        approval_id=approval.approval_id, operation_id="op-auth-ref", merchant_allocation_id=_allocation_id(plan)
     )
     cap = service.capture_payment(parent_operation_id=auth.operation_id, operation_id="op-cap-ref")
     refund_amount = Money(amount_minor=cap.amount.amount_minor // 2 or 1, currency=cap.amount.currency)
@@ -299,6 +359,7 @@ def test_duplicate_and_unverified_webhook_events_do_not_change_state():
     auth = service.authorize_payment(
         approval_id=approval.approval_id,
         operation_id="op-auth-wh",
+        merchant_allocation_id=_allocation_id(plan),
     )
     event = WebhookEvent(
         event_id="evt-1",

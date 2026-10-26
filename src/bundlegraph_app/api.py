@@ -33,7 +33,33 @@ from .application import (
 from .ids import new_id, plan_version_fingerprint  # noqa: F401 -- re-exported for client scripts
 from .planning import PlanningInputsRepository
 from .paypal import PayPalWebhookVerifier, RejectingWebhookVerifier
-from .state import Money, WebhookEvent
+from .state import Approval, Money, PaymentOperation, Plan, WebhookEvent
+
+
+class HealthResponse(BaseModel):
+    status: str
+    schema_version: str
+
+
+class ReadinessResponse(BaseModel):
+    status: str
+    checks: dict[str, bool]
+
+
+class PlanEnvelope(BaseModel):
+    plan: Plan
+
+
+class ApprovalEnvelope(BaseModel):
+    approval: Approval
+
+
+class PaymentOperationEnvelope(BaseModel):
+    operation: PaymentOperation
+
+
+class WebhookEnvelope(BaseModel):
+    recorded: bool
 
 
 class SubmitApprovalBody(BaseModel):
@@ -49,6 +75,7 @@ class AuthorizePaymentBody(BaseModel):
 
     approval_id: str = Field(min_length=1)
     operation_id: str = Field(min_length=1)
+    merchant_allocation_id: str = Field(min_length=1)
 
 
 class CapturePaymentBody(BaseModel):
@@ -67,6 +94,12 @@ class RefundCaptureBody(BaseModel):
     parent_operation_id: str = Field(min_length=1)
     operation_id: str = Field(min_length=1)
     amount: Money
+
+
+class ReconcilePaymentBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation_id: str = Field(min_length=1)
 
 
 class WebhookBody(BaseModel):
@@ -109,13 +142,13 @@ def build_app(
     readiness_checks = readiness or {"persistence": False, "authentication": False, "paypal": False, "webhook_verifier": False}
 
     @app.get("/healthz")
-    def healthz() -> dict[str, str]:
-        return {"status": "ok", "schema_version": "1.0"}
+    def healthz() -> HealthResponse:
+        return HealthResponse(status="ok", schema_version="1.0")
 
     @app.get("/readyz")
-    def readyz() -> dict[str, Any]:
+    def readyz() -> ReadinessResponse:
         ready = all(readiness_checks.values())
-        return {"status": "ready" if ready else "not_ready", "checks": readiness_checks}
+        return ReadinessResponse(status="ready" if ready else "not_ready", checks=readiness_checks)
 
     @app.post("/bundle-plans/generate")
     def generate_bundle_plans(body: AuthoritativePlanningRequest) -> dict[str, Any]:
@@ -129,7 +162,7 @@ def build_app(
         return response.model_dump(mode="json")
 
     @app.post("/plans")
-    def create_plan(body: CreatePlanBody) -> dict[str, Any]:
+    def create_plan(body: CreatePlanBody) -> PlanEnvelope | dict[str, Any]:
         service_response, inputs = _generate_from_authoritative_inputs(body, planning_inputs)
         if service_response.status is not ServiceStatus.OK or service_response.result is None or not service_response.result.proposals:
             return {"status": service_response.status.value, "reason_codes": list(service_response.reason_codes)}
@@ -147,10 +180,10 @@ def build_app(
             )
         except ApplicationError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
-        return {"plan": plan.model_dump(mode="json")}
+        return PlanEnvelope(plan=plan)
 
     @app.post("/plans/{plan_id}/replans")
-    def apply_replan(plan_id: str, body: ApplyReplanBody) -> dict[str, Any]:
+    def apply_replan(plan_id: str, body: ApplyReplanBody) -> PlanEnvelope:
         inputs = _require_planning_inputs(body.confirmation_reference, planning_inputs)
         replacement = body.replacement.replacement
         evidence = _proposal_evidence(replacement.evidence_references, inputs.catalog.evidence)
@@ -167,10 +200,10 @@ def build_app(
             )
         except ApplicationError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
-        return {"plan": plan.model_dump(mode="json")}
+        return PlanEnvelope(plan=plan)
 
     @app.post("/approvals")
-    def submit_approval(body: SubmitApprovalBody) -> dict[str, Any]:
+    def submit_approval(body: SubmitApprovalBody) -> ApprovalEnvelope:
         try:
             approval = service.submit_approval(
                 SubmitApprovalInput(
@@ -183,21 +216,22 @@ def build_app(
             )
         except ApplicationError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
-        return {"approval": approval.model_dump(mode="json")}
+        return ApprovalEnvelope(approval=approval)
 
     @app.post("/payments/authorize")
-    def authorize_payment(body: AuthorizePaymentBody) -> dict[str, Any]:
+    def authorize_payment(body: AuthorizePaymentBody) -> PaymentOperationEnvelope:
         try:
             op = service.authorize_payment(
                 approval_id=body.approval_id,
                 operation_id=body.operation_id,
+                merchant_allocation_id=body.merchant_allocation_id,
             )
         except ApplicationError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
-        return {"operation": op.model_dump(mode="json")}
+        return PaymentOperationEnvelope(operation=op)
 
     @app.post("/payments/capture")
-    def capture_payment(body: CapturePaymentBody) -> dict[str, Any]:
+    def capture_payment(body: CapturePaymentBody) -> PaymentOperationEnvelope:
         try:
             op = service.capture_payment(
                 parent_operation_id=body.parent_operation_id,
@@ -205,10 +239,10 @@ def build_app(
             )
         except ApplicationError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
-        return {"operation": op.model_dump(mode="json")}
+        return PaymentOperationEnvelope(operation=op)
 
     @app.post("/payments/void")
-    def void_authorization(body: VoidAuthorizationBody) -> dict[str, Any]:
+    def void_authorization(body: VoidAuthorizationBody) -> PaymentOperationEnvelope:
         try:
             op = service.void_authorization(
                 parent_operation_id=body.parent_operation_id,
@@ -216,10 +250,10 @@ def build_app(
             )
         except ApplicationError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
-        return {"operation": op.model_dump(mode="json")}
+        return PaymentOperationEnvelope(operation=op)
 
     @app.post("/payments/refund")
-    def refund_capture(body: RefundCaptureBody) -> dict[str, Any]:
+    def refund_capture(body: RefundCaptureBody) -> PaymentOperationEnvelope:
         try:
             op = service.refund_capture(
                 parent_operation_id=body.parent_operation_id,
@@ -228,10 +262,18 @@ def build_app(
             )
         except ApplicationError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
-        return {"operation": op.model_dump(mode="json")}
+        return PaymentOperationEnvelope(operation=op)
+
+    @app.post("/payments/reconcile")
+    def reconcile_payment(body: ReconcilePaymentBody) -> PaymentOperationEnvelope:
+        try:
+            op = service.reconcile_payment(body.operation_id)
+        except ApplicationError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+        return PaymentOperationEnvelope(operation=op)
 
     @app.post("/webhooks/paypal")
-    def paypal_webhook(body: WebhookBody) -> dict[str, Any]:
+    def paypal_webhook(body: WebhookBody) -> WebhookEnvelope:
         payload = body.model_dump(mode="json")
         verified = verifier.verify(payload)
         event = WebhookEvent(
@@ -244,7 +286,7 @@ def build_app(
             raw_payload_fingerprint=body.raw_payload_fingerprint,
         )
         advanced = service.record_webhook_event(event)
-        return {"recorded": advanced}
+        return WebhookEnvelope(recorded=advanced)
 
     return app
 

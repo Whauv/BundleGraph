@@ -25,6 +25,10 @@ add compatibility, solver, or research logic.
 - **PayPal operation ids are the authoritative idempotency key.** The adapter builds
   `PayPal-Request-Id = bg-<kind>-<operation_id>`, so a replayed call to the service
   returns the stored result and never calls PayPal twice.
+- **Recipients and amounts come from persisted merchant allocations.** A caller supplies
+  a stored allocation identifier when authorizing a payment; it can never submit a
+  merchant reference or amount. The allocation is calculated from server-side plan
+  line items, including each line's documented shipping and tax total.
 - **Recipient references come from the server-side catalog only.** A caller supplies
   only a confirmation reference; Member 2 resolves confirmed requirements and the
   normalized catalog through `PlanningInputsRepository`. LLM output, browser content,
@@ -34,6 +38,12 @@ add compatibility, solver, or research logic.
 - **Replan always invalidates.** `apply_replan` writes a new version and marks every
   prior granted approval `INVALIDATED` — material substitutions require a new
   approval even if the previous recipient and total happen to match.
+- **Repositories are ports.** `ApplicationService` depends on repository protocols;
+  deterministic in-memory implementations are only the demo/test adapter. A PostgreSQL
+  implementation must preserve their atomic `create_if_absent` semantics.
+- **Submitted operations are recoverable.** Repeating an operation, or calling
+  `POST /payments/reconcile`, reads the provider's idempotency result. It never sends
+  another money-moving request. A real provider adapter must implement that read path.
 
 ## Running the demo backend
 
@@ -43,9 +53,10 @@ python -m uvicorn bundlegraph_app.main:app --port 8080
 ```
 
 With no PayPal credentials, the deployment uses the deterministic in-process
-sandbox and the in-memory repositories. Replace both with the production adapter
-and PostgreSQL-backed repositories for a hosted deploy; the interfaces are the
-same.
+sandbox and the in-memory repositories. `build_demo_app()` is the explicit demo
+composition root. `build_production_app()` validates production settings and fails
+closed until PostgreSQL, authentication, PayPal Orders, and webhook-verification
+adapters are supplied.
 
 The local planning-input repository starts empty and fails closed. A demo or
 integration test must register an `AuthoritativePlanningInputs` record under an
