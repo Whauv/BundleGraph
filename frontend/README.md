@@ -23,6 +23,25 @@ cost-status fields, and merchant allocation. Fixture approval is deliberately a
 local simulation. Recovery presents a structured before/after delta and sends the
 user back to compare the revised fixture before a new simulated approval.
 
+The comparison experience now combines five reference patterns without copying
+third-party code: a PCPartPicker-style persistent requirement status, a B&H-style
+side-by-side table, Sweetwater-style technical education, Wirecutter-style
+recommendation/trade-off explanations, and explicit evidence provenance. These
+are presentation patterns only; the browser does not create compatibility or
+approval decisions.
+
+## Frontend structure
+
+- `app.js` coordinates navigation and browser events.
+- `modules/state.js` owns UI-only state and invalidation.
+- `modules/fixtures.js` contains the clearly synthetic offline response.
+- `modules/api-client.js` normalizes authoritative backend responses without
+  filling missing costs or evidence.
+- `modules/render-comparison.js` renders status, alternatives, reasoning, and
+  evidence.
+- `modules/render-graph.js` renders the interactive and readable graph views.
+- `modules/utils.js` contains formatting and safe HTML helpers.
+
 ## Run locally
 
 From the repository root:
@@ -32,6 +51,15 @@ python -m http.server 5173 --directory frontend
 ```
 
 Open `http://127.0.0.1:5173`. The default mode is fully offline and resettable.
+
+Run the frontend contract checks with:
+
+```powershell
+npm --prefix frontend run check
+```
+
+No npm packages are installed or required; `package.json` only declares the ES
+module mode and the Node test command.
 
 ## Optional backend mode
 
@@ -49,5 +77,6 @@ native browser APIs until the team verifies AG Grid/AG Studio access. The schedu
 is a transparent demo timeline, not a delivery-date promise; Bryntum integration
 is not claimed. The notification panel is simulated and does not call Zapier.
 
-Member 3 should replace only the fixture adapter in `app.js` after the final
-authoritative API contracts are deployed.
+Member 3 should extend `modules/api-client.js` only after final authoritative API
+contracts are deployed. Fixture behavior must remain separate in
+`modules/fixtures.js`.

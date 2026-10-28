@@ -56,13 +56,16 @@
 
       <section id="screen-compare" class="screen" aria-labelledby="compare-title" hidden>
         <div class="section-heading"><p class="step">3 · Compare</p><h2 id="compare-title">Compare complete alternatives, not isolated bargains.</h2></div>
-        <div id="bundle-cards" class="bundle-cards"></div>
+        <div class="comparison-shell">
+          <aside id="bundle-status" class="panel bundle-status" aria-label="Inspected bundle status"></aside>
+          <div class="comparison-content"><div id="comparison-table"></div><div id="bundle-cards" class="bundle-cards"></div></div>
+        </div>
         <div class="compare-layout">
-          <article class="panel"><h3>Compatibility dependency graph</h3><p class="muted">Select a component or connection to inspect its role, check, and source evidence.</p><div id="graph" class="graph" aria-label="Compatibility graph"></div></article>
+          <article class="panel"><h3>Compatibility dependency graph</h3><p class="muted">Select a component or connection to inspect its role, check, and source evidence.</p><div id="graph" class="graph" aria-label="Compatibility graph"></div><details><summary>Readable graph alternative</summary><ul id="graph-alternative"></ul></details></article>
           <article class="panel graph-detail"><h3>Selected component</h3><div id="graph-detail" aria-live="polite"></div></article>
           <article class="panel"><h3>Evidence and checks</h3><p class="muted">Select a finding to inspect the recorded observation. Selecting an evidence reference also highlights graph relationships that use it.</p><div id="findings"></div><div id="evidence-inspector" aria-live="polite"></div></article>
         </div>
-        <details class="glossary panel"><summary>Plain-language terms</summary><p><strong>XLR</strong> is a common locking three-pin connector for microphones. <strong>Phantom power</strong> is electrical power that a compatible audio interface can supply to microphones that require it. BundleGraph only treats these as compatible when the relevant evidence is available.</p></details>
+        <section class="education" aria-labelledby="education-title"><div><p class="eyebrow">Gear guide</p><h3 id="education-title">Understand the technical checks</h3></div><div class="education-grid"><details class="panel"><summary>XLR connectors</summary><p>A common locking three-pin microphone connection. A specific product is only treated as matching when evidence supports both ends.</p></details><details class="panel"><summary>Phantom power</summary><p>Electrical power supplied by some interfaces to compatible microphones that require it. Missing support evidence remains unknown.</p></details><details class="panel"><summary>Simultaneous microphone inputs</summary><p>Two participants using separate XLR microphones generally require two inputs that can be used at the same time.</p></details><details class="panel"><summary>Independent monitoring</summary><p>Each participant can listen through suitable headphone equipment. The exact requirement comes from the confirmed request.</p></details></div></section>
       </section>
 
       <section id="screen-approval" class="screen" aria-labelledby="approval-title" hidden>
