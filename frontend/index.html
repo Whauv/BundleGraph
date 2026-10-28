@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
     <header class="topbar">
       <div>
         <p class="eyebrow">BundleGraph · Member 3 experience</p>
@@ -18,7 +19,7 @@
       </div>
     </header>
 
-    <main>
+    <main id="main-content" tabindex="-1">
       <div class="notice" role="status">
         Fixture inventory and simulated payment events are clearly labeled. Unknown evidence and delivery timing stay unknown.
       </div>
@@ -40,8 +41,7 @@
             <select name="participants"><option value="1">1 person</option><option value="2" selected>2 people</option><option value="3">3 people</option><option value="4">4 people</option><option value="unknown">I’m not sure</option></select>
           </label>
           <fieldset class="wide"><legend>Laptop connectors</legend><p class="muted">Select every port you can use. “I’m not sure” keeps this requirement explicit for review.</p><div id="connector-options" class="choice-row"></div><details><summary>How do I identify my laptop port?</summary><p>USB-C is a small rounded oval. USB-A is the larger rectangular port. A 3.5 mm headphone jack is circular. Check the laptop’s side or its manufacturer support page.</p></details></fieldset>
-          <label>Deadline <input name="deadline" type="date"><small>Optional. Availability does not prove an arrival date.</small></label>
-          <label>Confirmed request reference <input name="confirmationReference" placeholder="Optional; required for live backend generation"><small>Only enter a reference issued by the authoritative backend.</small></label>
+          <details class="wide panel advanced-fields"><summary>Advanced details: deadline and backend reference</summary><div class="form-grid"><label>Deadline <input name="deadline" type="date"><small>Optional. Availability does not prove an arrival date.</small></label><label>Confirmed request reference <input name="confirmationReference" placeholder="Optional; required for backend generation"><small>Only enter a reference issued by the authoritative backend.</small></label></div></details>
           <fieldset class="wide"><legend>Listening requirement</legend><div id="monitoring-options" class="choice-row"></div></fieldset>
           <div class="wide action-row"><button class="button" type="submit">Review requirements</button><button class="button secondary" id="sample-request" type="button">Load sample request</button></div>
           <div id="request-error" class="form-error" role="alert" hidden></div>
@@ -56,6 +56,7 @@
 
       <section id="screen-compare" class="screen" aria-labelledby="compare-title" hidden>
         <div class="section-heading"><p class="step">3 · Compare</p><h2 id="compare-title">Compare complete alternatives, not isolated bargains.</h2></div>
+        <details class="panel candidate-browser"><summary>Browse synthetic candidate products</summary><p class="notice">Draft discovery only. Shortlisting a candidate does not make it compatible and does not change the solver response. No provider is queried.</p><form id="candidate-filters" class="candidate-filters"><label>Category<select name="category"><option value="all">All categories</option><option value="microphone">Microphones</option><option value="interface">Interfaces</option><option value="cable">Cables</option><option value="monitoring">Monitoring</option><option value="adapter">Adapters</option></select></label><label>Availability<select name="availability"><option value="all">Any status</option><option value="available">Available</option><option value="out_of_stock">Out of stock</option></select></label><label>Evidence<select name="evidence"><option value="all">Any evidence state</option><option value="complete">Complete</option><option value="missing">Missing</option><option value="stale">Stale</option></select></label><label>Maximum unit price<input name="maximumPrice" type="number" min="0" placeholder="No limit"></label><button id="clear-candidate-filters" class="button secondary" type="button">Clear filters</button></form><p id="candidate-count" class="muted" aria-live="polite"></p><div id="candidate-results" class="candidate-results"></div></details>
         <div class="comparison-shell">
           <aside id="bundle-status" class="panel bundle-status" aria-label="Inspected bundle status"></aside>
           <div class="comparison-content"><div id="comparison-table"></div><div id="bundle-cards" class="bundle-cards"></div></div>
@@ -71,8 +72,9 @@
       <section id="screen-approval" class="screen" aria-labelledby="approval-title" hidden>
         <div class="section-heading"><p class="step">4 · Approval</p><h2 id="approval-title">Approve one exact plan version.</h2></div>
         <div id="approval-summary" class="panel"></div>
-        <label class="consent"><input id="approval-checkbox" type="checkbox"> I reviewed this fixture plan’s components, total, and merchant allocation.</label>
-        <div class="action-row"><button class="button" id="approve-plan" disabled>Approve fixture plan</button><button class="button secondary back" data-target="compare">Back to comparison</button></div>
+        <div id="authoritative-approval-fields" class="panel" hidden><label>Approval actor reference<input id="actor-reference" autocomplete="off" placeholder="Identity reference supplied by Member 2 authentication"><small>This is sent only to the configured authoritative backend. Do not enter a password or secret.</small></label></div>
+        <label class="consent"><input id="approval-checkbox" type="checkbox"> I reviewed this exact plan version, components, total, and merchant allocation.</label>
+        <div class="action-row"><button class="button" id="approve-plan" disabled>Simulate fixture approval</button><button class="button secondary back" data-target="compare">Back to comparison</button></div>
       </section>
 
       <section id="screen-recovery" class="screen" aria-labelledby="recovery-title" hidden>

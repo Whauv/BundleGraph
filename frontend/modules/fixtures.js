@@ -85,6 +85,17 @@ export const fixture = {
 
 export const replacementBundle = { ...structuredClone(complete), key: "crescent-replacement", name: "Crescent Duo replacement fixture", version: 2, total: 710, budgetDifference: 190, ranking: "Replan candidate: preserves confirmed requirements after the original interface became unavailable.", allocations: [{ merchant: "Synthetic merchant", amount: 710, components: "All five revised line items" }], items: completeItems.map((item) => item.category === "Audio interface" ? { ...item, name: "Crescent Duo interface", unitPrice: 261, lineTotal: 261 } : item) };
 
+export const candidateCatalog = [
+  { id: "candidate-mic-aurora", category: "microphone", name: "Aurora dynamic microphone", variant: "XLR dynamic", price: 129, availability: "available", evidence: "complete", merchant: "Synthetic merchant", observedAt, facts: ["XLR connector", "No phantom-power requirement"] },
+  { id: "candidate-mic-nova", category: "microphone", name: "Nova condenser microphone", variant: "XLR condenser", price: 149, availability: "available", evidence: "complete", merchant: "Synthetic merchant", observedAt, facts: ["XLR connector", "Requires phantom power"] },
+  { id: "candidate-interface-duo", category: "interface", name: "Harbor Duo interface", variant: "Two-input USB-C", price: 229, availability: "available", evidence: "complete", merchant: "Synthetic merchant", observedAt, facts: ["Two microphone inputs", "Two headphone outputs"] },
+  { id: "candidate-interface-lite", category: "interface", name: "Harbor Duo Lite interface", variant: "Two-input listing", price: 199, availability: "available", evidence: "missing", merchant: "Synthetic merchant", observedAt, facts: ["Phantom-power support unknown"] },
+  { id: "candidate-interface-solo", category: "interface", name: "Cove Solo interface", variant: "One-input USB-C", price: 109, availability: "available", evidence: "complete", merchant: "Synthetic merchant", observedAt, facts: ["One microphone input"] },
+  { id: "candidate-cable-xlr", category: "cable", name: "Synthetic XLR cable", variant: "3 meter", price: 19, availability: "available", evidence: "complete", merchant: "Synthetic merchant", observedAt, facts: ["XLR female to XLR male"] },
+  { id: "candidate-headphones", category: "monitoring", name: "Closed-back headphones", variant: "Wired", price: 74, availability: "available", evidence: "complete", merchant: "Synthetic merchant", observedAt, facts: ["Wired monitoring"] },
+  { id: "candidate-adapter", category: "adapter", name: "USB-A host adapter", variant: "USB-C device to USB-A host", price: 12, availability: "out_of_stock", evidence: "stale", merchant: "Synthetic merchant", observedAt: "2026-08-01T15:00:00Z", facts: ["Directional adapter"] }
+];
+
 export function fixtureProposals(requirements) {
   const matches = requirements.useCase === fixture.requirements.useCase && requirements.budget === fixture.requirements.budget && requirements.participants === fixture.requirements.participants && requirements.monitoring === fixture.requirements.monitoring && requirements.connectors.length === 1 && requirements.connectors[0] === "usb-c";
   return matches ? structuredClone(fixture.bundles) : [];

@@ -40,6 +40,8 @@ approval decisions.
 - `modules/render-comparison.js` renders status, alternatives, reasoning, and
   evidence.
 - `modules/render-graph.js` renders the interactive and readable graph views.
+- `modules/render-candidates.js` provides isolated synthetic candidate browsing;
+  a shortlist never becomes a compatibility decision.
 - `modules/utils.js` contains formatting and safe HTML helpers.
 
 ## Run locally
@@ -61,6 +63,9 @@ npm --prefix frontend run check
 No npm packages are installed or required; `package.json` only declares the ES
 module mode and the Node test command.
 
+See [INTEGRATION.md](INTEGRATION.md) for runtime modes, exact routes, blocked live
+capabilities, release checks, and the opt-in backend readiness smoke test.
+
 ## Optional backend mode
 
 Append `?apiBase=http://127.0.0.1:8080` to use the authoritative backend for
@@ -80,3 +85,8 @@ is not claimed. The notification panel is simulated and does not call Zapier.
 Member 3 should extend `modules/api-client.js` only after final authoritative API
 contracts are deployed. Fixture behavior must remain separate in
 `modules/fixtures.js`.
+
+The current backend exposes no catalog-discovery route and no route that generates
+a replacement proposal from a failed item. The UI therefore keeps candidate
+shortlisting draft-only and will apply a live replan only after another trusted
+workflow supplies the complete schema-validated replacement object.

@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check app.js && node --test tests/*.test.mjs"
+    "check": "node --check app.js && node --test tests/fixture-contract.test.mjs tests/integration-contract.test.mjs",
+    "check:live": "node --test tests/live-smoke.test.mjs"
   }
 }

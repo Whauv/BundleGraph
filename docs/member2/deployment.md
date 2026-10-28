@@ -29,6 +29,7 @@ Environment variables:
 | `PAYPAL_CLIENT_ID` | yes (prod) | PayPal sandbox OAuth client id. |
 | `PAYPAL_CLIENT_SECRET` | yes (prod) | PayPal sandbox OAuth client secret. Must be set through the secret manager, never a `.env` in VCS. |
 | `PAYPAL_WEBHOOK_ID` | yes (prod) | PayPal webhook id used by the signature verification call. |
+| `BUNDLEGRAPH_FRONTEND_ORIGINS` | when frontend is cross-origin | Explicit comma-separated browser origins allowed to call the API. Wildcards and non-HTTP(S) origins are rejected. |
 
 ## Hosted (Render)
 
@@ -37,6 +38,8 @@ Environment variables:
 - Start: `uvicorn bundlegraph_app.main:app --host 0.0.0.0 --port $PORT`.
 - Health check path: `/healthz`.
 - Secrets are configured in Render's dashboard, not stored in the repository.
+- Prefer serving the UI and API from one origin. If they are separate, set
+  `BUNDLEGRAPH_FRONTEND_ORIGINS` to the exact HTTPS frontend origin.
 
 ## Durable storage
 
