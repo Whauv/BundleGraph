@@ -7,7 +7,7 @@ from a successful network request.
 | --- | --- | --- |
 | Fixture demo | No same-origin runtime and no `apiBase` query parameter | Synthetic discovery, planning, approval simulation, and recovery illustration only |
 | Planning backend ready | Same-origin application runtime or `apiBase` set; persistence, auth, and catalog checks pass | Save a draft, surface clarification, confirm, generate, persist a plan/evidence, and submit approval |
-| Full backend ready | Every `/readyz` check passes | Planning plus separately enabled payment/webhook capabilities |
+| Payment-capable backend | Planning checks plus PayPal and webhook checks pass | Planning plus separately enabled payment/webhook capabilities |
 
 When FastAPI serves the frontend, `GET /runtime-config` selects the same-origin
 API automatically. Use `?apiBase=http://127.0.0.1:8080` only for a separate local
@@ -29,17 +29,24 @@ but is not the deployed frontend topology.
 | `GET /runtime-config` | Safe same-origin runtime/capability discovery |
 | `POST /requirement-drafts/guided` | Save explicit answers as an unconfirmed owned draft |
 | `POST /requirement-drafts/{request_reference}/confirm` | Confirm the reviewed draft and snapshot the active server catalog |
+| `POST /candidates/discover` | Return labeled draft candidates from the active catalog or configured Channel3 adapter; never alters solver inputs |
 | `POST /bundle-plans/generate` | Resolve an authoritative confirmation reference and receive proposals |
 | `POST /plans` | Persist the selected backend proposal before approval |
 | `GET /bundle-plans/{plan_id}/evidence` | Confirm persisted evidence is available |
 | `POST /approvals` | Submit approval for the exact stored version, fingerprint, and total |
 | `POST /plans/{plan_id}/replans` | Adapter exists, but is called only with a complete schema-validated replacement proposal supplied by the backend workflow |
+| `POST /plans/{plan_id}/replan-proposals` | Generate structured replacement choices from the stored plan version and explicit failure facts |
 
-There is no public catalog discovery route in the repository. Catalog activation
-is an authenticated deployment operation, while the browse experience remains
-synthetic and isolated from selected proposals. There is also no route
-that generates a replan proposal from a failure event. The frontend shows this as
-a blocked live action rather than fabricating the replacement payload.
+Catalog activation remains an operator action. Discovery is read-only and its
+results stay isolated from the confirmed catalog snapshot. Replan generation is
+also non-authoritative; the browser must display deltas before separately asking
+Member 2 to create a new plan version.
+
+The browser persists only draft requirements and an early journey step in
+`sessionStorage`. It never persists the bearer token, approval, plan, payment, or
+provider data. URL `step` state is validated against completed steps. Changing a
+requirement invalidates the confirmation reference and in-flight generation;
+reset cancels stale UI updates and clears the session snapshot.
 
 ## Contract scenarios
 

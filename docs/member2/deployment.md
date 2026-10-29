@@ -36,10 +36,13 @@ Environment variables:
 | `BUNDLEGRAPH_MODE` | yes (application/prod) | `application` selects durable planning with payments disabled; `production` is fail-closed. |
 | `DATABASE_URL` | yes (application/prod) | PostgreSQL connection URL; keep it in the deployment secret manager. |
 | `BUNDLEGRAPH_AUTH_IDENTITIES` | yes (application) | JSON map of SHA-256 opaque-token hashes to `{subject, roles}`. |
+| `CHANNEL3_API_KEY` | optional | Enables live candidate discovery; without it discovery reads the active labeled catalog. |
 | `BUNDLEGRAPH_SANDBOX_RECIPIENTS` | yes (prod) | Comma-separated allowlist of sandbox merchant references the adapter may transact with. |
 | `PAYPAL_CLIENT_ID` | yes (prod) | PayPal sandbox OAuth client id. |
 | `PAYPAL_CLIENT_SECRET` | yes (prod) | PayPal sandbox OAuth client secret. Must be set through the secret manager, never a `.env` in VCS. |
 | `PAYPAL_WEBHOOK_ID` | yes (prod) | PayPal webhook id used by the signature verification call. |
+| `PAYPAL_APPROVED_ORDER_ID` | opt-in smoke only | Buyer-approved sandbox order consumed by the live lifecycle smoke test. |
+| `BUNDLEGRAPH_RUN_PAYPAL_SMOKE` | opt-in smoke only | Must equal `1` before the sandbox test can make money-state calls. |
 | `BUNDLEGRAPH_FRONTEND_ORIGINS` | when frontend is cross-origin | Explicit comma-separated browser origins allowed to call the API. Wildcards and non-HTTP(S) origins are rejected. |
 
 ## Hosted (Render)
@@ -53,6 +56,19 @@ Environment variables:
 - Secrets are configured in Render's dashboard, not stored in the repository.
 - Serve the UI and API from the same origin. The application composition mounts
   `frontend/` after the API routes and adds a same-origin content-security policy.
+
+## Observability and delivery checks
+
+Every HTTP response receives `X-Correlation-ID`. The server emits one JSON log
+record containing only method, path, status, duration, runtime, and correlation
+ID; bodies, tokens, requirements, evidence excerpts, and provider credentials are
+excluded. `/healthz` is liveness and `/readyz` exposes component readiness.
+
+`.github/workflows/ci.yml` runs Python contracts, frontend contracts, bytecode
+compilation, then builds and starts `compose.sandbox.yml` with PostgreSQL and
+checks the same-origin runtime. It does not push an image or deploy an external
+resource because no authoritative registry or hosting target has been selected.
+That remains the explicit CD handoff rather than an invented deployment.
 
 ## Durable storage
 

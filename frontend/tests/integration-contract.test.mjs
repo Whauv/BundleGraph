@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyAuthoritativeReplan, configureAccessToken, confirmRequirementDraft, createAuthoritativePlan, getBackendReadiness, saveGuidedRequirementDraft, submitAuthoritativeApproval } from "../modules/api-client.js";
+import { applyAuthoritativeReplan, configureAccessToken, confirmRequirementDraft, createAuthoritativePlan, discoverCandidates, getBackendReadiness, requestReplanProposals, saveGuidedRequirementDraft, submitAuthoritativeApproval } from "../modules/api-client.js";
 import { candidateCatalog } from "../modules/fixtures.js";
 import { filterCandidates } from "../modules/render-candidates.js";
 
@@ -8,7 +8,7 @@ const withFetch = async (handler, action) => { const original = globalThis.fetch
 const response = (payload, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => payload });
 
 test("candidate filters never convert draft candidates into proposals", () => {
-  const filtered = filterCandidates(candidateCatalog, { category: "interface", availability: "available", evidence: "complete", maximumPrice: "200" });
+  const filtered = filterCandidates(candidateCatalog, { category: "audio_interface", availability: "available", evidence: "complete", maximumPrice: "200" });
   assert.equal(filtered.length, 1);
   assert.equal(filtered[0].id, "candidate-interface-solo");
   assert.ok(filtered.every((item) => !Object.hasOwn(item, "classification")));
@@ -50,4 +50,18 @@ test("approval binds to the stored plan version and total", async () => {
 
 test("replan application refuses to invent a replacement payload", async () => {
   await assert.rejects(() => applyAuthoritativeReplan("https://api.example", "plan-1", "confirmed-1", null), /schema-validated replacement/);
+});
+
+test("candidate discovery remains a labeled draft result", async () => {
+  await withFetch(async (url, options) => { assert.equal(url, "https://api.example/candidates/discover"); assert.deepEqual(JSON.parse(options.body), { category: "microphone", query: "podcast", limit: 20 }); return response({ mode: "live", products: [{ product_id: "p1", category: "microphone", name: "Candidate", variant: "default", specifications: {}, origin: "live" }], offers: [] }); }, async () => {
+    const result = await discoverCandidates("https://api.example", { category: "microphone", query: "podcast" });
+    assert.equal(result.mode, "live"); assert.equal(result.candidates[0].evidence, "missing");
+  });
+});
+
+test("replan generation sends failure facts but cannot apply them", async () => {
+  await withFetch(async (url, options) => { assert.equal(url, "https://api.example/plans/plan-1/replan-proposals"); const body = JSON.parse(options.body); assert.deepEqual(body.failed_offer_ids, ["offer-1"]); return response({ replacements: [], search_status: "completed" }); }, async () => {
+    const result = await requestReplanProposals("https://api.example", "plan-1", { expected_plan_version: 1, failed_offer_ids: ["offer-1"] });
+    assert.deepEqual(result.replacements, []);
+  });
 });

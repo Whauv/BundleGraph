@@ -131,6 +131,7 @@ def test_create_plan_sets_fingerprint_and_moves_to_proposed():
     assert plan.current_version == 1
     assert plan.head().fingerprint
     assert plan.head().total.currency == "USD"
+    assert plan.head().payload["bundle_proposal"]["proposal_key"] == proposal.proposal_key
 
 
 def test_selected_proposal_evidence_is_persisted_through_member_two_reader():

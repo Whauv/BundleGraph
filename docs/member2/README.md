@@ -16,6 +16,7 @@ add compatibility, solver, or research logic.
 | Oct 25–28: deliver vertical slice | owned draft → clarification → confirmation/catalog snapshot → bundle → stored evidence/approval | shipped (PostgreSQL application mode; synthetic local catalog available) |
 | Nov 2–5: implement recovery | replan supersession invalidates the prior approval; webhook duplicates/out-of-order deliveries are a no-op | shipped |
 | Nov 2–5: deployment | FastAPI entrypoint, migrations, PostgreSQL adapters, auth/ownership, readiness, same-origin frontend | shipped (planning/approval); live PayPal remains blocked |
+| Hardening follow-up | Candidate discovery, generated replanning, structured HTTP logs, container sandbox, CI, PayPal sandbox validator | shipped locally; external deployment and live PayPal run remain opt-in/blocked |
 
 ## Key design decisions
 
@@ -45,6 +46,12 @@ add compatibility, solver, or research logic.
 - **Submitted operations are recoverable.** Repeating an operation, or calling
   `POST /payments/reconcile`, reads the provider's idempotency result. It never sends
   another money-moving request. A real provider adapter must implement that read path.
+- **Discovery is not selection.** `/candidates/discover` returns labeled draft
+  candidates from the active catalog or configured Channel3 adapter; it never
+  mutates a confirmation snapshot or bypasses Member 1's solver.
+- **Replan generation is not replan application.** The generation route uses the
+  stored proposal and confirmation snapshot, while the existing apply route alone
+  creates a successor version and invalidates approval.
 
 ## Running the durable planning backend
 

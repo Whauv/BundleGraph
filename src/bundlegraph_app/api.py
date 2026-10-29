@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from bundlegraph.service import (
     SCHEMA_VERSION,
@@ -22,11 +22,11 @@ from bundlegraph.service import (
     handle_generate_bundle_plans,
     handle_get_bundle_plan_evidence,
 )
-from bundlegraph.replanning import ReplacementBundleProposal
-from bundlegraph.selection import BundleSelectionRequest
+from bundlegraph.replanning import ExecutionFact, LockedComponent, ReplanRequest, ReplacementBundleProposal, replan_bundle
+from bundlegraph.selection import BundleProposal, BundleSelectionRequest, SolverLimits, select_bundles
 from bundlegraph.catalog import OFFLINE_FIXTURE_CATALOG
 from bundlegraph.interpretation import InterpretationRequest, StructuredExtractionProvider, clarification_questions, interpret_requirements
-from bundlegraph.models import ConfirmedRequirements, DraftRequirements
+from bundlegraph.models import ConfirmedRequirements, DraftRequirements, ProductCategory
 
 from .application import (
     ApplicationError,
@@ -39,6 +39,8 @@ from .ids import new_id, plan_version_fingerprint  # noqa: F401 -- re-exported f
 from .planning import AuthoritativePlanningInputs, PlanningInputsRepository
 from .auth import AuthenticationProvider, Identity, InMemoryResourceOwnershipRepository, RejectingAuthenticationProvider, ResourceOwnershipRepository, TestingAuthenticationProvider
 from .requirements import CatalogRepository, InMemoryCatalogRepository, InMemoryRequirementDraftRepository, RequirementDraftRepository, build_guided_draft, new_draft_record
+from .discovery import CandidateDiscovery, CatalogCandidateDiscovery
+from .observability import log_request, request_started
 from .paypal import PayPalWebhookVerifier, RejectingWebhookVerifier
 from .state import Approval, Money, PaymentOperation, Plan, WebhookEvent
 
@@ -95,6 +97,37 @@ class GuidedDraftBody(BaseModel):
     laptop_connectors: tuple[str, ...] = ()
     monitoring: str | None = None
     deadline: datetime | None = None
+
+
+class CandidateDiscoveryBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    category: ProductCategory
+    query: str = Field(min_length=1, max_length=200)
+    limit: int = Field(default=20, ge=1, le=30)
+
+
+class BoundedSolverLimits(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    max_evaluations: int = Field(default=1_000, gt=0, le=10_000)
+    max_proposals: int = Field(default=3, ge=1, le=3)
+
+
+class GenerateReplanBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_plan_version: int = Field(ge=1)
+    failed_product_ids: frozenset[str] = frozenset()
+    failed_offer_ids: frozenset[str] = frozenset()
+    excluded_product_ids: frozenset[str] = frozenset()
+    excluded_offer_ids: frozenset[str] = frozenset()
+    execution_facts: tuple[ExecutionFact, ...] = ()
+    locked_components: tuple[LockedComponent, ...] = ()
+    limits: BoundedSolverLimits = BoundedSolverLimits()
+
+    @model_validator(mode="after")
+    def require_change_trigger(self) -> "GenerateReplanBody":
+        if not (self.failed_product_ids or self.failed_offer_ids or self.excluded_product_ids or self.excluded_offer_ids):
+            raise ValueError("at least one failed or excluded product/offer is required")
+        return self
 
 
 class AuthorizePaymentBody(BaseModel):
@@ -167,6 +200,7 @@ def build_app(
     extraction_provider: StructuredExtractionProvider | None = None,
     frontend_directory: str | None = None,
     runtime_name: str = "test",
+    candidate_discovery: CandidateDiscovery | None = None,
 ) -> FastAPI:
     """Return a FastAPI application wired to the given authoritative service.
 
@@ -176,10 +210,18 @@ def build_app(
 
     @app.middleware("http")
     async def deployment_security_headers(request: Any, call_next: Any) -> Any:
-        response = await call_next(request)
+        started_at = request_started()
+        correlation_id = request.headers.get("x-correlation-id") or new_id("corr")
+        try:
+            response = await call_next(request)
+        except Exception:
+            log_request(method=request.method, path=request.url.path, status_code=500, correlation_id=correlation_id, started_at=started_at, runtime=runtime_name)
+            raise
+        response.headers["X-Correlation-ID"] = correlation_id
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Content-Security-Policy"] = "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+        log_request(method=request.method, path=request.url.path, status_code=response.status_code, correlation_id=correlation_id, started_at=started_at, runtime=runtime_name)
         return response
     if allowed_origins:
         app.add_middleware(CORSMiddleware, allow_origins=list(allowed_origins), allow_credentials=True, allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "X-Correlation-ID"])
@@ -189,6 +231,7 @@ def build_app(
     owners = ownership or InMemoryResourceOwnershipRepository()
     drafts = requirement_drafts or InMemoryRequirementDraftRepository()
     catalogs = catalog_repository or InMemoryCatalogRepository(OFFLINE_FIXTURE_CATALOG)
+    discovery = candidate_discovery or CatalogCandidateDiscovery(catalogs)
     test_auth = isinstance(authentication_provider, TestingAuthenticationProvider)
 
     def require_identity(authorization: str | None = Header(default=None)) -> Identity:
@@ -215,12 +258,13 @@ def build_app(
 
     @app.get("/readyz")
     def readyz() -> ReadinessResponse:
-        ready = all(readiness_checks.values())
+        required = ("persistence", "authentication", "catalog") if runtime_name == "application" else tuple(readiness_checks)
+        ready = all(readiness_checks.get(name, False) for name in required)
         return ReadinessResponse(status="ready" if ready else "not_ready", checks=readiness_checks)
 
     @app.get("/runtime-config")
     def runtime_config() -> dict[str, Any]:
-        return {"runtime": runtime_name, "api_base": "", "capabilities": {"planning": bool(readiness_checks.get("persistence") and readiness_checks.get("authentication") and readiness_checks.get("catalog", True)), "payments": bool(readiness_checks.get("paypal") and readiness_checks.get("webhook_verifier"))}}
+        return {"runtime": runtime_name, "api_base": "", "capabilities": {"planning": bool(readiness_checks.get("persistence") and readiness_checks.get("authentication") and readiness_checks.get("catalog", True)), "candidate_discovery": True, "live_candidate_provider": bool(readiness_checks.get("candidate_provider")), "payments": bool(readiness_checks.get("paypal") and readiness_checks.get("webhook_verifier"))}}
 
     @app.post("/requirement-drafts")
     def save_requirement_draft(draft: DraftRequirements, identity: Identity = Depends(require_identity)) -> dict[str, Any]:
@@ -241,6 +285,17 @@ def build_app(
         drafts.save(record)
         owners.claim("request", validated.request_reference, identity.subject)
         return {"draft": validated.model_dump(mode="json"), "version": version, "clarification_questions": list(record.clarification_questions), "can_confirm": not validated.missing_information}
+
+    @app.post("/candidates/discover")
+    def discover_candidates(body: CandidateDiscoveryBody, identity: Identity = Depends(require_identity)) -> dict[str, Any]:
+        del identity  # authentication is required; discovery itself is not owner-scoped state.
+        try:
+            return discovery.discover(category=body.category, query=body.query, limit=body.limit)
+        except Exception as exc:
+            from bundlegraph.channel3 import Channel3Error
+            if isinstance(exc, Channel3Error):
+                raise HTTPException(status.HTTP_502_BAD_GATEWAY, {"reason_code": "CANDIDATE_PROVIDER_FAILURE", "message": str(exc)}) from exc
+            raise
 
     @app.post("/requirement-drafts/guided")
     def save_guided_requirement_draft(body: GuidedDraftBody, identity: Identity = Depends(require_identity)) -> dict[str, Any]:
@@ -354,6 +409,21 @@ def build_app(
         except ApplicationError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
         return PlanEnvelope(plan=plan)
+
+    @app.post("/plans/{plan_id}/replan-proposals")
+    def generate_replan_proposals(plan_id: str, body: GenerateReplanBody, identity: Identity = Depends(require_identity)) -> dict[str, Any]:
+        require_owner(identity, "plan", plan_id)
+        try:
+            plan = service.get_plan(plan_id)
+        except ApplicationError as exc:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "plan not found") from exc
+        head = plan.head()
+        if head.version != body.expected_plan_version:
+            raise HTTPException(status.HTTP_409_CONFLICT, "plan version changed; reload before replanning")
+        inputs = _require_confirmation_owner(head.confirmation_reference, identity, planning_inputs)
+        original = _stored_or_reconstructed_proposal(head.payload, head.line_items, inputs)
+        result = replan_bundle(ReplanRequest(original_plan_id=plan.plan_id, original_plan_version=str(head.version), confirmation_reference=head.confirmation_reference, original_proposal=original, selection_request=BundleSelectionRequest(requirements=inputs.requirements, catalog=inputs.catalog, limits=SolverLimits.model_validate(body.limits.model_dump())), failed_product_ids=body.failed_product_ids, failed_offer_ids=body.failed_offer_ids, excluded_product_ids=body.excluded_product_ids, excluded_offer_ids=body.excluded_offer_ids, execution_facts=body.execution_facts, locked_components=body.locked_components))
+        return result.model_dump(mode="json")
 
     @app.post("/approvals")
     def submit_approval(body: SubmitApprovalBody, identity: Identity = Depends(require_identity)) -> ApprovalEnvelope:
@@ -481,6 +551,20 @@ def _require_confirmation_owner(confirmation_reference: str, identity: Identity,
     if inputs.owner_subject != identity.subject:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "confirmation reference not found")
     return inputs
+
+
+def _stored_or_reconstructed_proposal(payload: dict[str, Any], line_items: Any, inputs: AuthoritativePlanningInputs) -> BundleProposal:
+    """Read newly persisted proposal detail, with a deterministic legacy fallback."""
+    stored = payload.get("bundle_proposal")
+    if stored is not None:
+        return BundleProposal.model_validate(stored)
+    expected = {(item.offer_id, item.product_id, item.quantity) for item in line_items}
+    result = select_bundles(BundleSelectionRequest(requirements=inputs.requirements, catalog=inputs.catalog))
+    for proposal in result.proposals:
+        actual = {(item.offer_id, item.product_id, item.quantity) for item in proposal.line_items}
+        if actual == expected:
+            return proposal
+    raise HTTPException(status.HTTP_409_CONFLICT, "stored plan predates replan metadata and could not be reconstructed")
 
 
 def _generate_from_authoritative_inputs(

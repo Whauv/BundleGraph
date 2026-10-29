@@ -1,6 +1,6 @@
 import { fixture, fixtureProposals, replacementBundle } from "./modules/fixtures.js";
-import { configureAccessToken, confirmRequirementDraft, createAuthoritativePlan, getBackendReadiness, getPlanEvidence, getRuntimeConfig, requestBundlePlans, saveGuidedRequirementDraft, submitAuthoritativeApproval } from "./modules/api-client.js";
-import { canVisit, invalidateFrom, resetState, screens, store } from "./modules/state.js";
+import { applyAuthoritativeReplan, configureAccessToken, confirmRequirementDraft, createAuthoritativePlan, discoverCandidates, getBackendReadiness, getPlanEvidence, getRuntimeConfig, normalizeBackendResponse, requestBundlePlans, requestReplanProposals, saveGuidedRequirementDraft, submitAuthoritativeApproval } from "./modules/api-client.js";
+import { canVisit, clearSession, invalidateFrom, persistSession, resetState, restoreSession, screens, store } from "./modules/state.js";
 import { renderComparison } from "./modules/render-comparison.js";
 import { bindCandidateFilters, renderCandidates } from "./modules/render-candidates.js";
 import { $, escapeHtml, money, monitoringText, statusClass } from "./modules/utils.js";
@@ -10,6 +10,8 @@ function allowedApiBase(value) { if (!value) return null; try { const target = n
 let apiBase = allowedApiBase(requestedApiBase);
 const state = () => store.value;
 const planningBackendReady = () => Boolean(state().backendReadiness?.checks?.persistence && state().backendReadiness?.checks?.authentication && state().backendReadiness?.checks?.catalog !== false);
+let generationSequence = 0, discoverySequence = 0, replanSequence = 0;
+function setLoading(active, message = "Working…") { const element = $("#global-loading"); element.hidden = !active; element.textContent = message; document.documentElement.setAttribute("aria-busy", String(active)); }
 
 function showStatus(message, kind = "success") { const element = $("#app-status"); element.textContent = message; element.className = `status-message ${kind}`; element.hidden = false; }
 function clearStatus() { $("#app-status").hidden = true; }
@@ -36,7 +38,7 @@ function renderGuides() {
 }
 
 function updateChoice(event, dataName, field, convert = (value) => value) { const button = event.target.closest("button"); if (!button) return; state().requirements[field] = convert(button.dataset[dataName]); markRequestChanged(); syncForm(); }
-function markRequestChanged() { const reference = $("#request-form")?.elements?.confirmationReference; if (reference) reference.value = ""; if (invalidateFrom("request")) showStatus("Requirements changed. Review them again before selecting a proposal."); }
+function markRequestChanged() { generationSequence += 1; setLoading(false); const reference = $("#request-form")?.elements?.confirmationReference; if (reference) reference.value = ""; if (invalidateFrom("request")) showStatus("Requirements changed. Review them again before selecting a proposal."); persistSession(); }
 
 function renderJourney() {
   const labels = { request: "Request", review: "Review", compare: "Compare", approval: "Approve", recovery: "Recovery" };
@@ -46,7 +48,7 @@ function renderJourney() {
 
 function go(screen) {
   if (!canVisit(screen)) { showStatus("Complete the previous step before opening this screen.", "error"); return; }
-  state().current = screen; screens.forEach((name) => { $(`#screen-${name}`).hidden = name !== screen; }); renderJourney();
+  state().current = screen; screens.forEach((name) => { $(`#screen-${name}`).hidden = name !== screen; }); renderJourney(); const url = new URL(location.href); url.searchParams.set("step", screen); history.replaceState({ screen }, "", url); persistSession();
   ({ request: syncForm, review: renderReview, compare: () => { renderCandidates(state()); renderComparison(state(), { back: () => go("request"), approve: () => { state().maxScreen = Math.max(state().maxScreen, 3); go("approval"); } }); }, approval: renderApproval, recovery: renderRecovery })[screen]?.();
   const heading = $(`#screen-${screen} h2`); heading?.setAttribute("tabindex", "-1"); heading?.focus({ preventScroll: true }); window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -72,15 +74,27 @@ function renderApproval() {
 function renderRecovery() {
   $("#execution-status").innerHTML = state().approved ? `<h3>Execution status</h3><p><span class="tag ok">${state().source === "backend" ? "Awaiting authoritative execution" : "Fixture approval simulated"}</span></p><p>${state().failed ? "A simulated availability failure requires revised-plan review." : "No external payment has occurred."}</p>` : '<h3>Execution status</h3><p class="muted">Review a plan preview first.</p>';
   const schedule = state().failed ? ["Revised plan review", "Arrival timing remains unknown", "Assembly after arrival", "Audio test"] : ["Plan review", "Arrival timing remains unknown", "Assembly after arrival", "Audio test"]; $("#schedule").innerHTML = schedule.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
-  $("#simulate-failure").disabled = state().source === "backend"; $("#simulate-failure").textContent = state().source === "backend" ? "Await schema-validated replan proposal" : "Simulate unavailable interface";
-  if (state().source === "backend" && !state().failed) { $("#recovery-result").innerHTML = '<p class="notice">The current API can apply an already-structured replacement proposal, but it does not expose a route that generates one. The browser will not invent a replan payload.</p>'; return; }
+  $("#simulate-failure").disabled = state().source === "backend" && !state().authoritativePlan; $("#simulate-failure").textContent = state().source === "backend" ? "Generate replacement proposal" : "Simulate unavailable interface";
+  if (state().source === "backend") {
+    const head = state().authoritativePlan?.versions?.find((item) => item.version === state().authoritativePlan.current_version);
+    if (!head) { $("#recovery-result").innerHTML = '<p class="notice">Create and approve an authoritative plan before generating recovery proposals.</p>'; return; }
+    const options = head.line_items.map((item) => `<option value="${escapeHtml(item.offer_id)}">${escapeHtml(item.product_id)} · ${escapeHtml(item.offer_id)}</option>`).join("");
+    const generated = state().generatedReplan;
+    $("#recovery-result").innerHTML = `<label>Unavailable offer<select id="failed-offer">${options}</select></label>${generated ? renderGeneratedReplan(generated) : '<p class="muted">Choose the unavailable offer, then generate a deterministic replacement.</p>'}`;
+    $("#apply-replacement")?.addEventListener("click", applyGeneratedReplan);
+    return;
+  }
   if (!state().failed) return;
   $("#recovery-result").innerHTML = `<h4>Structured fixture recovery</h4><div class="recovery-grid">${[["Removed", fixture.recovery.removed], ["Added", fixture.recovery.added], ["Retained", fixture.recovery.retained], ["Quantity changes", fixture.recovery.quantityChanges]].map(([label, items]) => `<div><strong>${label}</strong><ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`).join("")}</div><p><strong>Cost difference:</strong> ${fixture.recovery.costChange}. <strong>Missing information:</strong> ${escapeHtml(fixture.recovery.missing)}. <strong>New approval required:</strong> ${fixture.recovery.requiresNewApproval ? "Yes" : "No"}.</p><button class="button" id="review-replacement">Review revised fixture plan</button>`;
   $("#review-replacement").addEventListener("click", () => { Object.assign(state(), { proposals: [structuredClone(replacementBundle)], selected: null, inspected: null, approved: false, maxScreen: 2 }); go("compare"); });
 }
 
+function renderGeneratedReplan(proposal) { const groups = [["Removed", proposal.removed_items], ["Added", proposal.added_items], ["Retained", proposal.retained_items], ["Quantity changed", proposal.quantity_changed_items]]; const difference = proposal.cost_difference ? money(proposal.cost_difference.amount_minor / 100) : "Unknown"; return `<h4>Generated recovery proposal</h4><div class="recovery-grid">${groups.map(([label, items]) => `<div><strong>${label}</strong><ul>${items.length ? items.map((item) => `<li>${escapeHtml(item.product_id)} (${item.previous_quantity} → ${item.replacement_quantity})</li>`).join("") : "<li>None</li>"}</ul></div>`).join("")}</div><p><strong>Cost difference:</strong> ${difference}. <strong>New approval required:</strong> ${proposal.requires_new_approval ? "Yes" : "No"}.</p><button class="button" id="apply-replacement">Create revised plan version</button>`; }
+
 async function generateAndCompare() {
+  const sequence = ++generationSequence;
   state().error = null; $("#confirm-requirements").disabled = true; $("#confirm-requirements").setAttribute("aria-busy", "true"); showStatus("Generating bundle proposals…");
+  setLoading(true, "Confirming requirements and generating plans…");
   configureAccessToken($("#request-form").elements.accessToken.value);
   let reference = $("#request-form").elements.confirmationReference.value.trim();
   try {
@@ -95,12 +109,12 @@ async function generateAndCompare() {
         reference = confirmation.confirmation_reference;
         $("#request-form").elements.confirmationReference.value = reference;
       }
-      const result = await requestBundlePlans(apiBase, reference); state().proposals = result.proposals; state().evidence = result.evidence; state().source = "backend"; if (!result.proposals.length) throw new Error("The backend did not supply a proposal."); showStatus("Draft confirmed and proposals generated by the authoritative backend.");
+      const result = await requestBundlePlans(apiBase, reference); if (sequence !== generationSequence) return; state().proposals = result.proposals; state().evidence = result.evidence; state().source = "backend"; if (!result.proposals.length) throw new Error("The backend did not supply a proposal."); showStatus("Draft confirmed and proposals generated by the authoritative backend.");
     }
     else { state().source = "fixture"; state().evidence = structuredClone(fixture.evidence); state().proposals = fixtureProposals(state().requirements); if (!state().proposals.length) throw new Error("Fixture mode supports exactly the two-person, $900, USB-C, independent-monitoring sample. Reload the sample or use a backend confirmation reference."); showStatus("Showing the labeled curated fixture response."); }
     Object.assign(state(), { selected: state().proposals.find((proposal) => proposal.classification === "verified_complete") || null, inspected: null, authoritativePlan: null, authoritativeApproval: null, maxScreen: Math.max(state().maxScreen, 2) }); go("compare");
   } catch (error) { Object.assign(state(), { proposals: [], selected: null, inspected: null, error: error.message, maxScreen: Math.max(state().maxScreen, 1) }); renderReview(); showStatus(error.message, "error"); }
-  finally { $("#confirm-requirements").disabled = false; $("#confirm-requirements").removeAttribute("aria-busy"); }
+  finally { if (sequence === generationSequence) { $("#confirm-requirements").disabled = false; $("#confirm-requirements").removeAttribute("aria-busy"); setLoading(false); } }
 }
 
 $("#request-form").addEventListener("input", () => { configureAccessToken($("#request-form").elements.accessToken.value); const values = new FormData($("#request-form")); const next = { useCase: values.get("useCase"), budget: Number(values.get("budget")), participants: values.get("participants"), connectors: [...$("#connector-options").querySelectorAll("input:checked")].map((input) => input.value), monitoring: state().requirements.monitoring, deadline: values.get("deadline") || "" }; if (JSON.stringify(next) !== JSON.stringify(state().requirements)) { state().requirements = next; markRequestChanged(); } });
@@ -108,8 +122,8 @@ $("#request-form").addEventListener("submit", (event) => { event.preventDefault(
 $("#sample-request").addEventListener("click", () => { state().requirements = structuredClone(fixture.requirements); state().source = "fixture"; state().error = null; markRequestChanged(); syncForm(); clearStatus(); });
 $("#confirm-requirements").addEventListener("click", generateAndCompare); $("#approval-checkbox").addEventListener("change", (event) => { $("#approve-plan").disabled = !event.currentTarget.checked || (state().source === "backend" && !planningBackendReady()); });
 $("#approve-plan").addEventListener("click", handleApprovalAction);
-$("#simulate-failure").addEventListener("click", () => { state().failed = true; $("#notification").hidden = false; $("#notification").textContent = "Simulated notification: the plan changed and needs a new review. No external notification was sent."; renderRecovery(); });
-$("#reset").addEventListener("click", () => { resetState(); $("#request-form").reset(); $("#candidate-filters").reset(); $("#notification").hidden = true; $("#recovery-result").innerHTML = ""; $("#request-error").hidden = true; clearStatus(); syncForm(); initializeBackendMode(); go("request"); });
+$("#simulate-failure").addEventListener("click", handleRecoveryAction);
+$("#reset").addEventListener("click", () => { generationSequence += 1; discoverySequence += 1; replanSequence += 1; setLoading(false); clearSession(); resetState(); $("#request-form").reset(); $("#candidate-filters").reset(); $("#notification").hidden = true; $("#recovery-result").innerHTML = ""; $("#request-error").hidden = true; clearStatus(); syncForm(); initializeBackendMode(); go("request"); });
 document.querySelectorAll(".back").forEach((button) => button.addEventListener("click", () => go(button.dataset.target)));
 
 async function handleApprovalAction() {
@@ -139,8 +153,38 @@ async function initializeBackendMode() {
   }
   if (!apiBase) { badge.textContent = "Curated fixture demo"; return; }
   badge.textContent = "Checking backend readiness";
-  try { state().backendReadiness = await getBackendReadiness(apiBase); const planningReady = planningBackendReady(); const fullyReady = state().backendReadiness.status === "ready"; badge.textContent = fullyReady ? "Backend connected · ready" : planningReady ? "Planning backend ready · payments disabled" : "Backend connected · not ready"; badge.className = `badge ${planningReady ? "backend" : "not-ready"}`; }
+  try { state().backendReadiness = await getBackendReadiness(apiBase); const planningReady = planningBackendReady(); const paymentsReady = state().backendReadiness.checks?.paypal && state().backendReadiness.checks?.webhook_verifier; badge.textContent = planningReady && paymentsReady ? "Backend connected · fully ready" : planningReady ? "Planning backend ready · payments disabled" : "Backend connected · not ready"; badge.className = `badge ${planningReady ? "backend" : "not-ready"}`; }
   catch { badge.textContent = "Backend unavailable · fixture fallback"; badge.className = "badge not-ready"; state().backendReadiness = { status: "unavailable" }; }
 }
 
-renderGuides(); bindCandidateFilters(state); renderJourney(); initializeBackendMode();
+async function handleCandidateDiscovery(event) {
+  event.preventDefault();
+  if (!apiBase) { showStatus("Connect an authenticated backend to discover catalog or live-provider candidates.", "error"); return; }
+  configureAccessToken($("#request-form").elements.accessToken.value);
+  const sequence = ++discoverySequence, values = new FormData(event.currentTarget), button = $("#discover-candidates");
+  button.disabled = true; button.setAttribute("aria-busy", "true"); setLoading(true, "Discovering candidates…");
+  try { const result = await discoverCandidates(apiBase, { category: values.get("category"), query: values.get("query") }); if (sequence !== discoverySequence) return; state().candidates = result.candidates; state().candidateMode = result.mode; state().candidateShortlist = []; renderCandidates(state()); showStatus(`Loaded ${result.candidates.length} ${result.mode} candidates. Discovery did not alter the plan catalog.`); }
+  catch (error) { if (sequence === discoverySequence) showStatus(error.message, "error"); }
+  finally { if (sequence === discoverySequence) { button.disabled = false; button.removeAttribute("aria-busy"); setLoading(false); } }
+}
+
+async function handleRecoveryAction() {
+  if (state().source !== "backend") { state().failed = true; $("#notification").hidden = false; $("#notification").textContent = "Simulated notification: the plan changed and needs a new review. No external notification was sent."; renderRecovery(); return; }
+  const plan = state().authoritativePlan, head = plan?.versions?.find((item) => item.version === plan.current_version), failedOffer = $("#failed-offer")?.value;
+  if (!plan || !head || !failedOffer) { showStatus("Select an authoritative plan offer to replace.", "error"); return; }
+  const sequence = ++replanSequence; setLoading(true, "Searching for compatible replacements…"); $("#simulate-failure").disabled = true;
+  try { const result = await requestReplanProposals(apiBase, plan.plan_id, { expected_plan_version: head.version, failed_offer_ids: [failedOffer], limits: { max_evaluations: 1000, max_proposals: 3 } }); if (sequence !== replanSequence) return; if (!result.replacements?.length) throw new Error(result.infeasibility?.explanation || "No compatible replacement was found."); state().generatedReplan = result.replacements[0]; state().failed = true; renderRecovery(); showStatus("Generated a replacement proposal. Review its structured changes before creating a new version."); }
+  catch (error) { if (sequence === replanSequence) showStatus(error.message, "error"); }
+  finally { if (sequence === replanSequence) { setLoading(false); $("#simulate-failure").disabled = false; } }
+}
+
+async function applyGeneratedReplan() {
+  const plan = state().authoritativePlan, proposal = state().generatedReplan, reference = $("#request-form").elements.confirmationReference.value.trim();
+  if (!plan || !proposal || !reference) return;
+  setLoading(true, "Creating revised plan version…");
+  try { const response = await applyAuthoritativeReplan(apiBase, plan.plan_id, reference, proposal); state().authoritativePlan = response.plan; state().authoritativeApproval = null; state().approved = false; const normalized = normalizeBackendResponse({ result: { proposals: [proposal.replacement] } }); state().selected = normalized.proposals[0]; state().generatedReplan = null; showStatus("Revised plan version created. A new approval is required."); go("approval"); }
+  catch (error) { showStatus(error.message, "error"); }
+  finally { setLoading(false); }
+}
+
+restoreSession(); renderGuides(); bindCandidateFilters(state); $("#candidate-discovery").addEventListener("submit", handleCandidateDiscovery); renderJourney(); initializeBackendMode(); const requestedStep = new URLSearchParams(location.search).get("step"); go(requestedStep && canVisit(requestedStep) ? requestedStep : state().current); window.addEventListener("popstate", () => { const step = new URLSearchParams(location.search).get("step"); if (step && canVisit(step)) go(step); });

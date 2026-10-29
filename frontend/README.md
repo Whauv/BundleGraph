@@ -90,7 +90,7 @@ Member 3 should extend `modules/api-client.js` only after final authoritative AP
 contracts are deployed. Fixture behavior must remain separate in
 `modules/fixtures.js`.
 
-The current backend exposes no catalog-discovery route and no route that generates
-a replacement proposal from a failed item. The UI therefore keeps candidate
-shortlisting draft-only and will apply a live replan only after another trusted
-workflow supplies the complete schema-validated replacement object.
+The backend now exposes authenticated candidate discovery and replacement
+generation. Candidate results remain draft-only. A generated replacement is
+reviewed before the separate apply call creates a new plan version and invalidates
+the old approval.

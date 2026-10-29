@@ -17,6 +17,8 @@ from .planning import PlanningInputsRepository
 from .config import RuntimeMode, application_settings, frontend_origins, production_settings, runtime_mode
 from .auth import ConfiguredBearerAuthenticationProvider, Identity, RejectingAuthenticationProvider
 from .postgres import PostgresApprovalRepository, PostgresCatalogRepository, PostgresEvidenceReader, PostgresPaymentRepository, PostgresPlanRepository, PostgresPlanningInputsRepository, PostgresRequirementDraftRepository, PostgresResourceOwnershipRepository, PostgresWebhookEventRepository, postgres_ready
+from .discovery import CatalogCandidateDiscovery, Channel3CandidateDiscovery
+from bundlegraph.channel3 import Channel3DiscoveryAdapter
 
 
 FRONTEND_DIRECTORY = Path(__file__).resolve().parents[2] / "frontend"
@@ -61,7 +63,9 @@ def build_application_app() -> "FastAPI":  # noqa: F821
     service = ApplicationService(plans=plans, approvals=approvals, payments=payments, webhook_events=webhooks, evidence_reader=evidence_reader, paypal=paypal)
     database_ready = postgres_ready(settings.database_url)
     catalog_ready = database_ready and catalogs.get_active() is not None
-    return build_app(service, evidence_reader, planning, readiness={"persistence": database_ready, "authentication": True, "catalog": catalog_ready, "paypal": False, "webhook_verifier": False}, allowed_origins=frontend_origins(), authentication_provider=auth, ownership=ownership, requirement_drafts=drafts, catalog_repository=catalogs, frontend_directory=str(FRONTEND_DIRECTORY), runtime_name="application")
+    channel3_key = os.getenv("CHANNEL3_API_KEY", "").strip()
+    discovery = Channel3CandidateDiscovery(Channel3DiscoveryAdapter.from_api_key(channel3_key)) if channel3_key else CatalogCandidateDiscovery(catalogs)
+    return build_app(service, evidence_reader, planning, readiness={"persistence": database_ready, "authentication": True, "catalog": catalog_ready, "candidate_provider": bool(channel3_key), "paypal": False, "webhook_verifier": False}, allowed_origins=frontend_origins(), authentication_provider=auth, ownership=ownership, requirement_drafts=drafts, catalog_repository=catalogs, frontend_directory=str(FRONTEND_DIRECTORY), runtime_name="application", candidate_discovery=discovery)
 
 
 def build_production_app() -> "FastAPI":  # noqa: F821

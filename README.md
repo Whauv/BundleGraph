@@ -127,7 +127,39 @@ python -m uvicorn bundlegraph_app.main:app --host 127.0.0.1 --port 8080
 
 Open `http://127.0.0.1:8080`, enter the local-only token `local-dev-token` under **Advanced details**, and submit the guided request. The local demo catalog command deliberately activates refreshed synthetic offers with zero synthetic shipping/tax for an end-to-end dry run; never use that command for a live deployment. Use `activate-catalog <catalog-id> <normalized-catalog.json>` for reviewed deployment data.
 
+For a disposable same-origin sandbox with PostgreSQL, migrations, and the labeled
+synthetic catalog:
+
+```powershell
+docker compose -f compose.sandbox.yml up --build --wait
+# Open http://127.0.0.1:8080 and use local-dev-token
+docker compose -f compose.sandbox.yml down --volumes
+```
+
+The authenticated API also exposes draft-only `POST /candidates/discover` and
+non-authoritative `POST /plans/{plan_id}/replan-proposals`. Applying a selected
+replacement remains a separate call that creates a new plan version and requires
+new approval.
+
 `BUNDLEGRAPH_MODE=demo` remains the default, offline fixture-only UI. `BUNDLEGRAPH_MODE=production` still fails closed until the documented real PayPal Orders and webhook-verification adapters are available. `/healthz` is liveness; `/readyz` reports persistence, authentication, active catalog, PayPal, and webhook readiness. See [Member 2 deployment](docs/member2/deployment.md).
+
+## PayPal sandbox validation
+
+The opt-in validator uses PayPal's documented OAuth, Orders v2, Payments v2,
+and webhook-verification endpoints. It never runs in normal tests. Create an
+`AUTHORIZE` order, approve it with a sandbox buyer, then explicitly complete a
+capture/refund or void path:
+
+```powershell
+$env:PAYPAL_CLIENT_ID="..."
+$env:PAYPAL_CLIENT_SECRET="..."
+python -m bundlegraph_app.paypal_smoke create --amount-minor 100
+# Approve the printed sandbox URL, then:
+python -m bundlegraph_app.paypal_smoke complete ORDER_ID --amount-minor 100 --action capture-refund
+```
+
+Printing an approval URL is not a passed end-to-end check. Only the successful
+`complete` result is evidence that the selected sandbox lifecycle ran.
 
 ## Member 2 application layer
 

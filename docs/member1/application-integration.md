@@ -1,6 +1,8 @@
 # Phase 4 application integration
 
-No model provider configuration, model SDK, API router, or persistence implementation exists in this repository. The integration layer therefore exposes callable adapters only. Member 2 owns routing, authentication, IDs, persistence, and confirmation/approval lifecycle.
+No live model provider is configured. Member 2 now supplies the API router,
+PostgreSQL adapters, authentication, ownership checks, IDs, and the
+confirmation/approval lifecycle while Member 1 remains deterministic.
 
 ## Requirements interpretation
 
@@ -29,6 +31,12 @@ The internal request passed to `handle_generate_bundle_plans` has this shape:
 ```
 
 The response contains `schema_version`, `correlation_id`, a timezone-aware `generated_at`, machine-readable `reason_codes`, and selection output. It does not persist a plan or claim an approval.
+
+`POST /candidates/discover` wraps the existing provider-neutral discovery port.
+Its candidates are draft data and do not enter a confirmation snapshot. `POST
+/plans/{id}/replan-proposals` invokes `replan_bundle` with the stored proposal,
+immutable confirmation catalog, explicit failure/exclusion facts, locks, and
+bounded limits. A separate Member 2 route applies one reviewed replacement.
 
 Map `GET /bundle-plans/{id}/evidence` to `handle_get_bundle_plan_evidence(raw_request, reader)`, where `reader` is Member 2's `BundlePlanEvidenceReader` implementation. The adapter has exactly one `get_evidence_for_plan(plan_id)` method; BundleGraph does not add a database.
 

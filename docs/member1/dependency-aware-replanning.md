@@ -8,7 +8,7 @@ Locked components become `RequiredOfferQuantity` constraints in the shared solve
 
 Each replacement contains machine-readable added, removed, retained, and quantity-changed items; material-change reasons; a compatibility dependency subgraph; evidence references; cost delta; recovery-cost summary; and `requires_new_approval: true`. Recovery facts are supplied by Member 2. Unknown recovery costs remain unknown and are never counted as zero or described as refundable.
 
-The affected subgraph is derived from the replacement compatibility graph for products in a material delta. Costs compare only verified all-in totals in the same currency; otherwise `cost_difference` is null with an explicit assumption.
+The affected subgraph is derived from the replacement compatibility graph for products in a material delta. Costs compare only verified all-in totals in the same currency; the minor-unit difference is signed, so a cheaper replacement is negative. Otherwise `cost_difference` is null with an explicit assumption.
 
 ## Member handoff
 

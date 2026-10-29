@@ -65,3 +65,11 @@ export async function applyAuthoritativeReplan(apiBase, planId, confirmationRefe
 export const saveRequirementDraft = (apiBase, draft) => requestJson(`${apiBase.replace(/\/$/, "")}/requirement-drafts`, { method: "POST", headers: requestHeaders(), body: JSON.stringify(draft) });
 export const saveGuidedRequirementDraft = (apiBase, draft) => requestJson(`${apiBase.replace(/\/$/, "")}/requirement-drafts/guided`, { method: "POST", headers: requestHeaders(), body: JSON.stringify(draft) });
 export const confirmRequirementDraft = (apiBase, requestReference, expectedVersion) => requestJson(`${apiBase.replace(/\/$/, "")}/requirement-drafts/${encodeURIComponent(requestReference)}/confirm`, { method: "POST", headers: requestHeaders(), body: JSON.stringify({ expected_version: expectedVersion }) });
+
+export async function discoverCandidates(apiBase, { category, query, limit = 20 }) {
+  const payload = await requestJson(`${apiBase.replace(/\/$/, "")}/candidates/discover`, { method: "POST", headers: requestHeaders(), body: JSON.stringify({ category, query, limit }) });
+  const offersByProduct = new Map((payload.offers || []).map((offer) => [offer.product_id, offer]));
+  return { mode: payload.mode || "unknown", reasonCode: payload.reason_code, candidates: (payload.products || []).map((product) => { const offer = offersByProduct.get(product.product_id); return { id: product.product_id, category: product.category, name: product.name, variant: product.variant, price: amount(offer?.unit_price), merchant: offer?.merchant_reference || "No offer supplied", availability: offer?.availability_status || "unknown", evidence: Object.keys(product.specifications || {}).length ? "complete" : "missing", observedAt: offer?.observed_at || "Unknown", facts: Object.keys(product.specifications || {}), origin: product.origin || payload.mode || "unknown" }; }) };
+}
+
+export const requestReplanProposals = (apiBase, planId, body) => requestJson(`${apiBase.replace(/\/$/, "")}/plans/${encodeURIComponent(planId)}/replan-proposals`, { method: "POST", headers: requestHeaders(), body: JSON.stringify(body) });

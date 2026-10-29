@@ -24,6 +24,7 @@
         Fixture inventory and simulated payment events are clearly labeled. Unknown evidence and delivery timing stay unknown.
       </div>
       <div id="app-status" class="status-message" role="status" aria-live="polite" hidden></div>
+      <div id="global-loading" class="loading-bar" role="status" aria-live="polite" hidden>Working…</div>
       <nav aria-label="Demo journey" class="journey" id="journey"></nav>
 
       <section id="screen-request" class="screen" aria-labelledby="request-title">
@@ -56,7 +57,7 @@
 
       <section id="screen-compare" class="screen" aria-labelledby="compare-title" hidden>
         <div class="section-heading"><p class="step">3 · Compare</p><h2 id="compare-title">Compare complete alternatives, not isolated bargains.</h2></div>
-        <details class="panel candidate-browser"><summary>Browse synthetic candidate products</summary><p class="notice">Draft discovery only. Shortlisting a candidate does not make it compatible and does not change the solver response. No provider is queried.</p><form id="candidate-filters" class="candidate-filters"><label>Category<select name="category"><option value="all">All categories</option><option value="microphone">Microphones</option><option value="interface">Interfaces</option><option value="cable">Cables</option><option value="monitoring">Monitoring</option><option value="adapter">Adapters</option></select></label><label>Availability<select name="availability"><option value="all">Any status</option><option value="available">Available</option><option value="out_of_stock">Out of stock</option></select></label><label>Evidence<select name="evidence"><option value="all">Any evidence state</option><option value="complete">Complete</option><option value="missing">Missing</option><option value="stale">Stale</option></select></label><label>Maximum unit price<input name="maximumPrice" type="number" min="0" placeholder="No limit"></label><button id="clear-candidate-filters" class="button secondary" type="button">Clear filters</button></form><p id="candidate-count" class="muted" aria-live="polite"></p><div id="candidate-results" class="candidate-results"></div></details>
+        <details class="panel candidate-browser"><summary>Browse candidate products</summary><p class="notice">Discovery is draft-only. Shortlisting never proves compatibility or changes the solver response. The source label distinguishes catalog fixtures from live provider results.</p><form id="candidate-discovery" class="candidate-discovery"><label>Search products<input name="query" value="podcast microphone" maxlength="200"></label><label>Discovery category<select name="category"><option value="microphone">Microphones</option><option value="audio_interface">Interfaces</option><option value="xlr_cable">XLR cables</option><option value="headphones">Headphones</option><option value="usb_adapter">USB adapters</option></select></label><button id="discover-candidates" class="button" type="submit">Discover candidates</button></form><form id="candidate-filters" class="candidate-filters"><label>Filter category<select name="category"><option value="all">All categories</option><option value="microphone">Microphones</option><option value="audio_interface">Interfaces</option><option value="xlr_cable">XLR cables</option><option value="headphones">Headphones</option><option value="usb_adapter">USB adapters</option></select></label><label>Availability<select name="availability"><option value="all">Any status</option><option value="available">Available</option><option value="out_of_stock">Out of stock</option></select></label><label>Evidence<select name="evidence"><option value="all">Any evidence state</option><option value="complete">Complete</option><option value="missing">Missing</option><option value="stale">Stale</option></select></label><label>Maximum unit price<input name="maximumPrice" type="number" min="0" placeholder="No limit"></label><button id="clear-candidate-filters" class="button secondary" type="button">Clear filters</button></form><p id="candidate-count" class="muted" aria-live="polite"></p><div id="candidate-results" class="candidate-results"></div></details>
         <div class="comparison-shell">
           <aside id="bundle-status" class="panel bundle-status" aria-label="Inspected bundle status"></aside>
           <div class="comparison-content"><div id="comparison-table"></div><div id="bundle-cards" class="bundle-cards"></div></div>
@@ -83,11 +84,11 @@
           <article id="execution-status" class="panel"></article>
           <article class="panel"><h3>Schedule consequences</h3><p class="muted">Illustrative assembly timeline; availability does not prove arrival dates.</p><ol id="schedule" class="timeline"></ol></article>
         </div>
-        <div class="panel recovery-panel"><h3>Simulated stock failure</h3><p>Use this controlled scenario to show a replacement proposal. It never performs a cancellation, refund, or purchase.</p><button id="simulate-failure" class="button danger">Simulate unavailable interface</button><div id="recovery-result"></div></div>
+        <div class="panel recovery-panel"><h3>Availability recovery</h3><p>Generate a proposal after a selected offer becomes unavailable. This never performs a cancellation, refund, or purchase.</p><button id="simulate-failure" class="button danger">Generate replacement proposal</button><div id="recovery-result"></div></div>
         <div id="notification" class="notice notification" hidden></div>
       </section>
     </main>
-    <footer>BundleGraph demo · deterministic fixture data · no live merchant or payment claims</footer>
+    <footer>BundleGraph · candidate origin is labeled · compatibility stays evidence-backed · no browser payment execution</footer>
     <script type="module" src="app.js"></script>
   </body>
 </html>
