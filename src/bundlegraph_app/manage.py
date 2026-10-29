@@ -19,12 +19,21 @@ def _database_url() -> str:
     return value
 
 
+def _migration_directory(environ: dict[str, str] | None = None) -> Path:
+    values = environ or os.environ
+    configured = values.get("BUNDLEGRAPH_MIGRATIONS_DIR", "").strip()
+    directory = Path(configured) if configured else Path(__file__).resolve().parents[2] / "migrations"
+    if not directory.is_dir() or not any(directory.glob("*.sql")):
+        raise SystemExit(f"no SQL migrations found in {directory}")
+    return directory
+
+
 def migrate(database_url: str) -> None:
     try:
         import psycopg
     except ImportError as exc:
         raise SystemExit("Install the postgres dependency group before migrating") from exc
-    migration_directory = Path(__file__).resolve().parents[2] / "migrations"
+    migration_directory = _migration_directory()
     with psycopg.connect(database_url) as connection:
         with connection.cursor() as cursor:
             cursor.execute("CREATE TABLE IF NOT EXISTS bundlegraph_schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())")

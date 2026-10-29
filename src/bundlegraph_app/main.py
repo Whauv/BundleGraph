@@ -21,7 +21,13 @@ from .discovery import CatalogCandidateDiscovery, Channel3CandidateDiscovery
 from bundlegraph.channel3 import Channel3DiscoveryAdapter
 
 
-FRONTEND_DIRECTORY = Path(__file__).resolve().parents[2] / "frontend"
+def _frontend_directory(environ: dict[str, str] | None = None) -> Path:
+    values = environ or os.environ
+    configured = values.get("BUNDLEGRAPH_FRONTEND_DIRECTORY", "").strip()
+    directory = Path(configured) if configured else Path(__file__).resolve().parents[2] / "frontend"
+    if not directory.is_dir() or not (directory / "index.html").is_file():
+        raise RuntimeError(f"frontend build not found in {directory}")
+    return directory
 
 
 def build_demo_app() -> "FastAPI":  # noqa: F821 -- forward reference for lazy FastAPI import
@@ -42,7 +48,7 @@ def build_demo_app() -> "FastAPI":  # noqa: F821 -- forward reference for lazy F
     # A real deployment injects a durable confirmation/catalog repository during
     # startup.  The empty local repository deliberately fails closed until an
     # authoritative confirmation has been registered.
-    return build_app(service, evidence_reader, PlanningInputsRepository(), readiness={"persistence": False, "authentication": False, "paypal": False, "webhook_verifier": False}, allowed_origins=frontend_origins(), authentication_provider=RejectingAuthenticationProvider(), frontend_directory=str(FRONTEND_DIRECTORY), runtime_name="demo")
+    return build_app(service, evidence_reader, PlanningInputsRepository(), readiness={"persistence": False, "authentication": False, "paypal": False, "webhook_verifier": False}, allowed_origins=frontend_origins(), authentication_provider=RejectingAuthenticationProvider(), frontend_directory=str(_frontend_directory()), runtime_name="demo")
 
 
 def build_application_app() -> "FastAPI":  # noqa: F821
@@ -65,7 +71,7 @@ def build_application_app() -> "FastAPI":  # noqa: F821
     catalog_ready = database_ready and catalogs.get_active() is not None
     channel3_key = os.getenv("CHANNEL3_API_KEY", "").strip()
     discovery = Channel3CandidateDiscovery(Channel3DiscoveryAdapter.from_api_key(channel3_key)) if channel3_key else CatalogCandidateDiscovery(catalogs)
-    return build_app(service, evidence_reader, planning, readiness={"persistence": database_ready, "authentication": True, "catalog": catalog_ready, "candidate_provider": bool(channel3_key), "paypal": False, "webhook_verifier": False}, allowed_origins=frontend_origins(), authentication_provider=auth, ownership=ownership, requirement_drafts=drafts, catalog_repository=catalogs, frontend_directory=str(FRONTEND_DIRECTORY), runtime_name="application", candidate_discovery=discovery)
+    return build_app(service, evidence_reader, planning, readiness={"persistence": database_ready, "authentication": True, "catalog": catalog_ready, "candidate_provider": bool(channel3_key), "paypal": False, "webhook_verifier": False}, allowed_origins=frontend_origins(), authentication_provider=auth, ownership=ownership, requirement_drafts=drafts, catalog_repository=catalogs, frontend_directory=str(_frontend_directory()), runtime_name="application", candidate_discovery=discovery)
 
 
 def build_production_app() -> "FastAPI":  # noqa: F821

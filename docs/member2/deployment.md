@@ -103,3 +103,12 @@ durable repository and provider read API are implemented.
 Log only the metadata that `redact_service_log_fields` returns from
 `bundlegraph.service`. Request content, requirements, budget, and evidence
 excerpts never go to logs.
+
+## Container asset paths
+
+The image builds the React frontend in a Node stage and copies only the compiled
+`dist` output into the Python runtime. It sets
+`BUNDLEGRAPH_MIGRATIONS_DIR=/app/migrations` and
+`BUNDLEGRAPH_FRONTEND_DIRECTORY=/app/frontend`; startup fails closed if either
+the SQL migration set or compiled frontend index is missing. On a failed Compose
+smoke check, CI prints the app and database container logs before cleanup.

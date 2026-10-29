@@ -37,5 +37,7 @@ jobs:
       - run: docker compose -f compose.sandbox.yml up --detach --build --wait
       - run: curl --fail --show-error http://127.0.0.1:8080/healthz
       - run: curl --fail --show-error http://127.0.0.1:8080/runtime-config
+      - if: failure()
+        run: docker compose -f compose.sandbox.yml logs --no-color
       - if: always()
         run: docker compose -f compose.sandbox.yml down --volumes
