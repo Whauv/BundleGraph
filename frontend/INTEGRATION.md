@@ -5,32 +5,39 @@ from a successful network request.
 
 | Mode | How selected | Allowed behavior |
 | --- | --- | --- |
-| Fixture demo | No `apiBase` query parameter | Synthetic discovery, planning, approval simulation, and recovery illustration only |
-| Backend connected, not ready | `apiBase` set; `/readyz` returns `not_ready` | Read-only generation may be attempted; authoritative writes are disabled |
-| Backend ready | `apiBase` set; `/readyz` returns `ready` | Generate, create a stored plan, retrieve its evidence, and submit approval through documented Member 2 routes |
+| Fixture demo | No same-origin runtime and no `apiBase` query parameter | Synthetic discovery, planning, approval simulation, and recovery illustration only |
+| Planning backend ready | Same-origin application runtime or `apiBase` set; persistence, auth, and catalog checks pass | Save a draft, surface clarification, confirm, generate, persist a plan/evidence, and submit approval |
+| Full backend ready | Every `/readyz` check passes | Planning plus separately enabled payment/webhook capabilities |
 
-Use `?apiBase=http://127.0.0.1:8080` when running the local API. Do not place
+When FastAPI serves the frontend, `GET /runtime-config` selects the same-origin
+API automatically. Use `?apiBase=http://127.0.0.1:8080` only for a separate local
+static server. Do not place
 credentials, PayPal identifiers, merchant recipients, or provider keys in the
 URL or browser code.
 
-When UI and API use different origins, the API must set
-`BUNDLEGRAPH_FRONTEND_ORIGINS=http://127.0.0.1:5173` (or the exact deployed HTTPS
-origin). Wildcards, URL paths, embedded credentials, and non-HTTP(S) origins are
-rejected. Prefer a same-origin reverse proxy for production.
+Cross-origin API overrides are accepted only between loopback hosts for local
+development. A deployed browser and API must be same-origin; this prevents a
+crafted `apiBase` link from receiving the in-memory bearer token. The API's CORS
+allowlist remains available for non-browser service clients and transition work,
+but is not the deployed frontend topology.
 
 ## Documented routes used
 
 | Route | Frontend use |
 | --- | --- |
 | `GET /readyz` | Runtime readiness banner and fail-closed write gating |
+| `GET /runtime-config` | Safe same-origin runtime/capability discovery |
+| `POST /requirement-drafts/guided` | Save explicit answers as an unconfirmed owned draft |
+| `POST /requirement-drafts/{request_reference}/confirm` | Confirm the reviewed draft and snapshot the active server catalog |
 | `POST /bundle-plans/generate` | Resolve an authoritative confirmation reference and receive proposals |
 | `POST /plans` | Persist the selected backend proposal before approval |
 | `GET /bundle-plans/{plan_id}/evidence` | Confirm persisted evidence is available |
 | `POST /approvals` | Submit approval for the exact stored version, fingerprint, and total |
 | `POST /plans/{plan_id}/replans` | Adapter exists, but is called only with a complete schema-validated replacement proposal supplied by the backend workflow |
 
-There is no catalog discovery route in the repository. The browse experience is
-therefore synthetic and isolated from selected proposals. There is also no route
+There is no public catalog discovery route in the repository. Catalog activation
+is an authenticated deployment operation, while the browse experience remains
+synthetic and isolated from selected proposals. There is also no route
 that generates a replan proposal from a failure event. The frontend shows this as
 a blocked live action rather than fabricating the replacement payload.
 

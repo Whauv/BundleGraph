@@ -1,12 +1,15 @@
 import { fixture, fixtureProposals, replacementBundle } from "./modules/fixtures.js";
-import { createAuthoritativePlan, getBackendReadiness, getPlanEvidence, requestBundlePlans, submitAuthoritativeApproval } from "./modules/api-client.js";
+import { configureAccessToken, confirmRequirementDraft, createAuthoritativePlan, getBackendReadiness, getPlanEvidence, getRuntimeConfig, requestBundlePlans, saveGuidedRequirementDraft, submitAuthoritativeApproval } from "./modules/api-client.js";
 import { canVisit, invalidateFrom, resetState, screens, store } from "./modules/state.js";
 import { renderComparison } from "./modules/render-comparison.js";
 import { bindCandidateFilters, renderCandidates } from "./modules/render-candidates.js";
 import { $, escapeHtml, money, monitoringText, statusClass } from "./modules/utils.js";
 
-const apiBase = new URLSearchParams(location.search).get("apiBase");
+const requestedApiBase = new URLSearchParams(location.search).get("apiBase");
+function allowedApiBase(value) { if (!value) return null; try { const target = new URL(value, location.origin); const localHosts = new Set(["127.0.0.1", "localhost", "::1"]); return target.origin === location.origin || (localHosts.has(target.hostname) && localHosts.has(location.hostname)) ? target.origin : null; } catch { return null; } }
+let apiBase = allowedApiBase(requestedApiBase);
 const state = () => store.value;
+const planningBackendReady = () => Boolean(state().backendReadiness?.checks?.persistence && state().backendReadiness?.checks?.authentication && state().backendReadiness?.checks?.catalog !== false);
 
 function showStatus(message, kind = "success") { const element = $("#app-status"); element.textContent = message; element.className = `status-message ${kind}`; element.hidden = false; }
 function clearStatus() { $("#app-status").hidden = true; }
@@ -33,7 +36,7 @@ function renderGuides() {
 }
 
 function updateChoice(event, dataName, field, convert = (value) => value) { const button = event.target.closest("button"); if (!button) return; state().requirements[field] = convert(button.dataset[dataName]); markRequestChanged(); syncForm(); }
-function markRequestChanged() { if (invalidateFrom("request")) showStatus("Requirements changed. Review them again before selecting a proposal."); }
+function markRequestChanged() { const reference = $("#request-form")?.elements?.confirmationReference; if (reference) reference.value = ""; if (invalidateFrom("request")) showStatus("Requirements changed. Review them again before selecting a proposal."); }
 
 function renderJourney() {
   const labels = { request: "Request", review: "Review", compare: "Compare", approval: "Approve", recovery: "Recovery" };
@@ -62,7 +65,7 @@ function renderApproval() {
   const sourceAllocations = version?.merchant_allocations?.map((item) => ({ merchant: item.merchant_reference, amount: item.amount?.amount_minor / 100, components: item.offer_ids?.join(", ") })) || bundle.allocations || [];
   const allocations = sourceAllocations.length ? `<ul>${sourceAllocations.map((allocation) => `<li>${escapeHtml(allocation.merchant)} — ${money(allocation.amount)} (${escapeHtml(allocation.components)})</li>`).join("")}</ul>` : "No merchant allocation was supplied.";
   $("#approval-summary").innerHTML = `<span class="badge fixture">${state().source === "backend" ? plan ? "Authoritative stored plan" : "Backend proposal — not yet persisted" : "Fixture preview — simulated approval only"}</span><h3>${escapeHtml(bundle.name)}</h3><dl class="kv">${plan ? `<dt>Plan ID</dt><dd>${escapeHtml(plan.plan_id)}</dd>` : ""}<dt>Plan version</dt><dd>${escapeHtml(version?.version ?? bundle.version)}</dd><dt>${plan ? "Persisted total" : "Supplied total"}</dt><dd>${money(version?.total?.amount_minor !== undefined ? version.total.amount_minor / 100 : bundle.total)}</dd><dt>Shipping / tax</dt><dd>${escapeHtml(bundle.shippingStatus)} / ${escapeHtml(bundle.taxStatus)}</dd><dt>Compatibility</dt><dd><span class="tag ${statusClass(bundle.status)}">${escapeHtml(bundle.status)}</span></dd><dt>Merchant allocations</dt><dd>${allocations}</dd><dt>Approval boundary</dt><dd>${state().source === "backend" ? plan ? "Submitting will call Member 2's authoritative approval route for this exact stored version." : "Create the stored plan before submitting approval." : "This records a local simulation only. It sends no approval or payment."}</dd>${state().authoritativeApproval ? `<dt>Approval status</dt><dd>${escapeHtml(state().authoritativeApproval.status)} · ${escapeHtml(state().authoritativeApproval.approval_id)}</dd>` : ""}</dl><h4>Confirmed checks for this supplied proposal</h4><ul class="status-checklist">${(bundle.requirementStatus || []).map((item) => `<li><span class="status-dot ${statusClass(item.status)}" aria-hidden="true"></span><span><strong>${escapeHtml(item.label)}</strong> — ${escapeHtml(item.detail)}</span></li>`).join("")}</ul>`;
-  const backendReady = state().backendReadiness?.status === "ready";
+  const backendReady = planningBackendReady();
   $("#authoritative-approval-fields").hidden = state().source !== "backend" || !plan; $("#approve-plan").textContent = state().source === "backend" ? backendReady ? plan ? "Submit authoritative approval" : "Create authoritative plan" : "Backend is not ready for authoritative writes" : "Simulate fixture approval"; $("#approval-checkbox").checked = false; $("#approval-checkbox").disabled = state().source === "backend" && !backendReady; $("#approve-plan").disabled = true;
 }
 
@@ -78,19 +81,32 @@ function renderRecovery() {
 
 async function generateAndCompare() {
   state().error = null; $("#confirm-requirements").disabled = true; $("#confirm-requirements").setAttribute("aria-busy", "true"); showStatus("Generating bundle proposals…");
-  const reference = $("#request-form").elements.confirmationReference.value.trim();
+  configureAccessToken($("#request-form").elements.accessToken.value);
+  let reference = $("#request-form").elements.confirmationReference.value.trim();
   try {
-    if (apiBase && reference) { const result = await requestBundlePlans(apiBase, reference); state().proposals = result.proposals; state().evidence = result.evidence; state().source = "backend"; if (!result.proposals.length) throw new Error("The backend did not supply a proposal."); showStatus("Rendered proposals supplied by the backend."); }
+    if (apiBase) {
+      if (!reference) {
+        const requestReference = `req_${crypto.randomUUID()}`;
+        const values = state().requirements;
+        const deadline = values.deadline ? new Date(`${values.deadline}T23:59:59`).toISOString() : null;
+        const draft = await saveGuidedRequirementDraft(apiBase, { request_reference: requestReference, use_case: values.useCase || null, participants: values.participants === "unknown" ? null : Number(values.participants), budget_minor: Number.isFinite(values.budget) ? Math.round(values.budget * 100) : null, currency: "USD", laptop_connectors: values.connectors, monitoring: values.monitoring, deadline });
+        if (!draft.can_confirm) throw new Error(`More information is required: ${(draft.clarification_questions || []).join(" ")}`);
+        const confirmation = await confirmRequirementDraft(apiBase, requestReference, draft.version);
+        reference = confirmation.confirmation_reference;
+        $("#request-form").elements.confirmationReference.value = reference;
+      }
+      const result = await requestBundlePlans(apiBase, reference); state().proposals = result.proposals; state().evidence = result.evidence; state().source = "backend"; if (!result.proposals.length) throw new Error("The backend did not supply a proposal."); showStatus("Draft confirmed and proposals generated by the authoritative backend.");
+    }
     else { state().source = "fixture"; state().evidence = structuredClone(fixture.evidence); state().proposals = fixtureProposals(state().requirements); if (!state().proposals.length) throw new Error("Fixture mode supports exactly the two-person, $900, USB-C, independent-monitoring sample. Reload the sample or use a backend confirmation reference."); showStatus("Showing the labeled curated fixture response."); }
     Object.assign(state(), { selected: state().proposals.find((proposal) => proposal.classification === "verified_complete") || null, inspected: null, authoritativePlan: null, authoritativeApproval: null, maxScreen: Math.max(state().maxScreen, 2) }); go("compare");
   } catch (error) { Object.assign(state(), { proposals: [], selected: null, inspected: null, error: error.message, maxScreen: Math.max(state().maxScreen, 1) }); renderReview(); showStatus(error.message, "error"); }
   finally { $("#confirm-requirements").disabled = false; $("#confirm-requirements").removeAttribute("aria-busy"); }
 }
 
-$("#request-form").addEventListener("input", () => { const values = new FormData($("#request-form")); const next = { useCase: values.get("useCase"), budget: Number(values.get("budget")), participants: values.get("participants"), connectors: [...$("#connector-options").querySelectorAll("input:checked")].map((input) => input.value), monitoring: state().requirements.monitoring, deadline: values.get("deadline") || "" }; if (JSON.stringify(next) !== JSON.stringify(state().requirements)) { state().requirements = next; markRequestChanged(); } });
+$("#request-form").addEventListener("input", () => { configureAccessToken($("#request-form").elements.accessToken.value); const values = new FormData($("#request-form")); const next = { useCase: values.get("useCase"), budget: Number(values.get("budget")), participants: values.get("participants"), connectors: [...$("#connector-options").querySelectorAll("input:checked")].map((input) => input.value), monitoring: state().requirements.monitoring, deadline: values.get("deadline") || "" }; if (JSON.stringify(next) !== JSON.stringify(state().requirements)) { state().requirements = next; markRequestChanged(); } });
 $("#request-form").addEventListener("submit", (event) => { event.preventDefault(); const error = $("#request-error"); if (!state().requirements.useCase.trim() || !Number.isFinite(state().requirements.budget) || state().requirements.budget <= 0) { error.textContent = "Enter a use case and a positive maximum budget."; error.hidden = false; return; } error.hidden = true; state().maxScreen = Math.max(state().maxScreen, 1); go("review"); });
 $("#sample-request").addEventListener("click", () => { state().requirements = structuredClone(fixture.requirements); state().source = "fixture"; state().error = null; markRequestChanged(); syncForm(); clearStatus(); });
-$("#confirm-requirements").addEventListener("click", generateAndCompare); $("#approval-checkbox").addEventListener("change", (event) => { $("#approve-plan").disabled = !event.currentTarget.checked || (state().source === "backend" && state().backendReadiness?.status !== "ready"); });
+$("#confirm-requirements").addEventListener("click", generateAndCompare); $("#approval-checkbox").addEventListener("change", (event) => { $("#approve-plan").disabled = !event.currentTarget.checked || (state().source === "backend" && !planningBackendReady()); });
 $("#approve-plan").addEventListener("click", handleApprovalAction);
 $("#simulate-failure").addEventListener("click", () => { state().failed = true; $("#notification").hidden = false; $("#notification").textContent = "Simulated notification: the plan changed and needs a new review. No external notification was sent."; renderRecovery(); });
 $("#reset").addEventListener("click", () => { resetState(); $("#request-form").reset(); $("#candidate-filters").reset(); $("#notification").hidden = true; $("#recovery-result").innerHTML = ""; $("#request-error").hidden = true; clearStatus(); syncForm(); initializeBackendMode(); go("request"); });
@@ -98,7 +114,7 @@ document.querySelectorAll(".back").forEach((button) => button.addEventListener("
 
 async function handleApprovalAction() {
   if (state().source !== "backend") { state().approved = true; state().maxScreen = Math.max(state().maxScreen, 4); showStatus("Fixture approval simulated locally. No approval or payment was sent."); go("recovery"); return; }
-  if (state().backendReadiness?.status !== "ready") { showStatus("The backend is not ready for authenticated authoritative writes.", "error"); return; }
+  if (!planningBackendReady()) { showStatus("The backend is not ready for authenticated authoritative writes.", "error"); return; }
   const reference = $("#request-form").elements.confirmationReference.value.trim();
   if (!apiBase || !reference) { showStatus("A configured backend and confirmation reference are required.", "error"); return; }
   $("#approve-plan").disabled = true; $("#approve-plan").setAttribute("aria-busy", "true");
@@ -110,8 +126,7 @@ async function handleApprovalAction() {
       try { const evidenceResponse = await getPlanEvidence(apiBase, response.plan.plan_id); state().persistedEvidenceCount = evidenceResponse.evidence?.length || 0; } catch { state().persistedEvidenceCount = null; }
       showStatus("Authoritative plan created. Review its stored version and submit approval separately."); renderApproval(); return;
     }
-    const actor = $("#actor-reference").value.trim(); if (!actor) throw new Error("Enter the authenticated actor reference supplied by Member 2.");
-    const response = await submitAuthoritativeApproval(apiBase, state().authoritativePlan, actor); if (!response.approval) throw new Error("The backend did not return an approval record.");
+    const response = await submitAuthoritativeApproval(apiBase, state().authoritativePlan); if (!response.approval) throw new Error("The backend did not return an approval record.");
     state().authoritativeApproval = response.approval; state().approved = response.approval.status === "granted"; state().maxScreen = Math.max(state().maxScreen, 4); showStatus(`Authoritative approval returned status: ${response.approval.status}.`); go("recovery");
   } catch (error) { showStatus(error.message, "error"); }
   finally { $("#approve-plan").removeAttribute("aria-busy"); if (state().current === "approval") $("#approve-plan").disabled = !$("#approval-checkbox").checked; }
@@ -119,9 +134,12 @@ async function handleApprovalAction() {
 
 async function initializeBackendMode() {
   const badge = $("#mode-badge");
+  if (!apiBase) {
+    try { const runtime = await getRuntimeConfig(location.origin); if (runtime.runtime === "application" || runtime.runtime === "production") apiBase = location.origin; } catch { /* A standalone static server has no backend runtime endpoint. */ }
+  }
   if (!apiBase) { badge.textContent = "Curated fixture demo"; return; }
   badge.textContent = "Checking backend readiness";
-  try { state().backendReadiness = await getBackendReadiness(apiBase); const ready = state().backendReadiness.status === "ready"; badge.textContent = ready ? "Backend connected · ready" : "Backend connected · not deployment-ready"; badge.className = `badge ${ready ? "backend" : "not-ready"}`; }
+  try { state().backendReadiness = await getBackendReadiness(apiBase); const planningReady = planningBackendReady(); const fullyReady = state().backendReadiness.status === "ready"; badge.textContent = fullyReady ? "Backend connected · ready" : planningReady ? "Planning backend ready · payments disabled" : "Backend connected · not ready"; badge.className = `badge ${planningReady ? "backend" : "not-ready"}`; }
   catch { badge.textContent = "Backend unavailable · fixture fallback"; badge.className = "badge not-ready"; state().backendReadiness = { status: "unavailable" }; }
 }
 

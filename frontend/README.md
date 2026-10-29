@@ -66,14 +66,18 @@ module mode and the Node test command.
 See [INTEGRATION.md](INTEGRATION.md) for runtime modes, exact routes, blocked live
 capabilities, release checks, and the opt-in backend readiness smoke test.
 
-## Optional backend mode
+## Authoritative backend mode
 
-Append `?apiBase=http://127.0.0.1:8080` to use the authoritative backend for
-request generation when it is available, then enter an issued confirmation
-reference. The browser renders the returned proposals and graph rather than
-presenting fixtures as a backend response. It shows a retryable error for an
-unavailable backend or an empty response. The browser never sends payment
-recipients, amounts, credentials, or a client-side confirmation claim.
+In `BUNDLEGRAPH_MODE=application`, FastAPI serves this directory and the API from
+the same origin. The UI discovers that runtime automatically. Enter a
+deployment-issued access token; the browser holds it in memory only. If no
+confirmation reference is supplied, the browser saves the guided answers as a
+draft, displays server clarification failures, requests a separate confirmation,
+and then generates proposals from the server-held catalog snapshot.
+
+Append `?apiBase=http://127.0.0.1:8080` only when developing with a separate
+static server. The browser never supplies an approval actor, payment recipient,
+merchant mapping, or confirmation claim.
 
 ## Integration status
 

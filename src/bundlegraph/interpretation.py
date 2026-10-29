@@ -105,8 +105,15 @@ def _clarification_question(item: str) -> str:
         "laptop connector": "Which connector(s) are available on the laptop?",
         "monitoring requirement": "Do both participants need independent headphone monitoring?",
         "participant count": "How many podcast participants need microphones?",
+        "supported use case": "The current verified domain is a two-person podcast. Should this request use that topology?",
+        "supported participant topology": "The current verified domain supports exactly two participants. Should this request use two participants?",
     }
     return labels.get(item, f"Please confirm: {item}.")
+
+
+def clarification_questions(missing_information: tuple[str, ...]) -> tuple[str, ...]:
+    """Return deterministic questions for explicit missing-information labels."""
+    return tuple(_clarification_question(item) for item in missing_information)
 
 
 def interpret_requirements(request: InterpretationRequest, provider: StructuredExtractionProvider) -> RequirementInterpretation:
@@ -122,7 +129,7 @@ def interpret_requirements(request: InterpretationRequest, provider: StructuredE
         explicit_facts=payload.explicit_facts,
         suggested_defaults=payload.suggested_defaults,
         missing_information=payload.missing_information,
-        clarification_questions=tuple(_clarification_question(item) for item in payload.missing_information),
+        clarification_questions=clarification_questions(payload.missing_information),
         provider_mode="fixture" if isinstance(provider, FixtureExtractionProvider) else "injected_provider",
     )
 

@@ -1,8 +1,8 @@
 # BundleGraph
 
-Member 1 Phase 1: validated domain contracts, a curated synthetic fixture catalog, and one deterministic compatibility rule for a two-person podcast setup.
+BundleGraph is an evidence-aware bundle planner for podcast equipment. Member 1 provides normalized catalog/evidence contracts, deterministic compatibility, bounded selection, and replanning. The `bundlegraph_app` boundary adds authoritative requirement confirmation, PostgreSQL persistence, ownership authorization, plans, approvals, and payment ports. The browser application can be served by the same FastAPI process.
 
-This package deliberately contains no payment, authentication, persistence, frontend, or deployment code. The catalog is synthetic fixture data for offline development; it is not a live retailer feed and must never be presented as one.
+The bundled catalog is synthetic fixture data for offline development; it is not a live retailer feed and must never be presented as one.
 
 ## Contract principles
 
@@ -111,17 +111,26 @@ not configured. See the frontend readme for exact integration limits.
 
 `bundlegraph.replanning` turns a Member 2-supplied failed component into deterministic, non-authoritative replacement proposals. It reuses the bounded solver, preserves locked components and confirmed constraints, emits structured deltas and dependency subgraphs, and always marks material recovery proposals as requiring new approval. See [re-planning handoff](docs/member1/dependency-aware-replanning.md).
 
-## Deployment safety
+## Durable same-origin application
 
-`BUNDLEGRAPH_MODE=demo` is the default and uses in-memory state with the fake PayPal client. Production mode fails closed until `DATABASE_URL`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_WEBHOOK_ID`, and `BUNDLEGRAPH_SANDBOX_RECIPIENTS` are present and real PostgreSQL, authentication, PayPal Orders, and webhook-verification adapters are wired. `/healthz` reports process liveness; `/readyz` reports whether those runtime dependencies are ready. The initial PostgreSQL schema is [001_member2_state.sql](migrations/001_member2_state.sql); apply it only through the deployment migration job.
+`BUNDLEGRAPH_MODE=application` enables the deployable planning and approval path. It uses PostgreSQL for requirement drafts, catalog snapshots, confirmed planning inputs, ownership, plans, approvals, evidence, and operation records. FastAPI serves `frontend/` at `/`, so the browser discovers the API at the same origin and CORS is unnecessary.
+
+```powershell
+python -m pip install -e ".[app,test]"
+$env:DATABASE_URL="postgresql://bundlegraph:bundlegraph@127.0.0.1:5432/bundlegraph"
+$env:BUNDLEGRAPH_AUTH_IDENTITIES='{"0cd48eed49739dfdd99efaef37d251aae5a80866e5954763c6597943fff5ce9b":{"subject":"local-user","roles":[]}}'
+python -m bundlegraph_app.manage migrate
+python -m bundlegraph_app.manage activate-local-demo-catalog
+$env:BUNDLEGRAPH_MODE="application"
+python -m uvicorn bundlegraph_app.main:app --host 127.0.0.1 --port 8080
+```
+
+Open `http://127.0.0.1:8080`, enter the local-only token `local-dev-token` under **Advanced details**, and submit the guided request. The local demo catalog command deliberately activates refreshed synthetic offers with zero synthetic shipping/tax for an end-to-end dry run; never use that command for a live deployment. Use `activate-catalog <catalog-id> <normalized-catalog.json>` for reviewed deployment data.
+
+`BUNDLEGRAPH_MODE=demo` remains the default, offline fixture-only UI. `BUNDLEGRAPH_MODE=production` still fails closed until the documented real PayPal Orders and webhook-verification adapters are available. `/healthz` is liveness; `/readyz` reports persistence, authentication, active catalog, PayPal, and webhook readiness. See [Member 2 deployment](docs/member2/deployment.md).
 
 ## Member 2 application layer
 
 `bundlegraph_app` is the authoritative application layer: durable plan IDs and versions, approval binding by plan-version fingerprint, persisted merchant allocations, idempotent PayPal sandbox adapter (authorize/capture/void/refund), reconciliation of submitted operations, webhook deduplication, and a FastAPI boundary wiring Member 1's handlers. It is strictly outside the `bundlegraph` intelligence package and lives in `src/bundlegraph_app/`.
-
-```powershell
-python -m pip install -e ".[app]"
-python -m uvicorn bundlegraph_app.main:app --port 8080
-```
 
 See [Member 2 overview](docs/member2/README.md), [state machine](docs/member2/state-machine.md), [PayPal integration](docs/member2/paypal-integration.md), and [deployment](docs/member2/deployment.md).

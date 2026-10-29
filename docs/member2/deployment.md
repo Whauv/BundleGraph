@@ -7,24 +7,35 @@ because the real secrets still need to be rotated through Render's secret UI.
 
 ## Composition roots
 
-`bundlegraph_app.main.build_demo_app()` is the only local/demo composition root:
-it uses in-memory repositories and `FakeSandboxClient`. `build_production_app()`
-validates required environment settings and then fails closed until the team wires
-PostgreSQL repositories, a real authentication provider, a PayPal Orders client,
-and a server-side webhook verifier. This prevents a production process from
-silently starting with demo state.
+- `demo` is the offline fixture UI with in-memory state and rejecting authentication.
+- `application` is the durable PostgreSQL-backed requirement, planning, evidence,
+  ownership, and approval runtime. Payments and webhooks remain disabled.
+- `production` remains fail-closed until the real PayPal Orders transport and
+  webhook verifier are configured; it never falls back to fake adapters.
 
 ## Local
 
 ```powershell
-python -m pip install -e ".[app]"
+python -m pip install -e ".[app,test]"
+$env:DATABASE_URL="postgresql://bundlegraph:bundlegraph@127.0.0.1:5432/bundlegraph"
+$env:BUNDLEGRAPH_AUTH_IDENTITIES='{"0cd48eed49739dfdd99efaef37d251aae5a80866e5954763c6597943fff5ce9b":{"subject":"local-user","roles":[]}}'
+python -m bundlegraph_app.manage migrate
+python -m bundlegraph_app.manage activate-local-demo-catalog
+$env:BUNDLEGRAPH_MODE="application"
 python -m uvicorn bundlegraph_app.main:app --port 8080
 ```
+
+The example hash corresponds only to the local token `local-dev-token`. Replace
+it with a high-entropy deployment-issued token and secret-managed JSON outside
+local development. Raw tokens are never stored in configuration or PostgreSQL.
 
 Environment variables:
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
+| `BUNDLEGRAPH_MODE` | yes (application/prod) | `application` selects durable planning with payments disabled; `production` is fail-closed. |
+| `DATABASE_URL` | yes (application/prod) | PostgreSQL connection URL; keep it in the deployment secret manager. |
+| `BUNDLEGRAPH_AUTH_IDENTITIES` | yes (application) | JSON map of SHA-256 opaque-token hashes to `{subject, roles}`. |
 | `BUNDLEGRAPH_SANDBOX_RECIPIENTS` | yes (prod) | Comma-separated allowlist of sandbox merchant references the adapter may transact with. |
 | `PAYPAL_CLIENT_ID` | yes (prod) | PayPal sandbox OAuth client id. |
 | `PAYPAL_CLIENT_SECRET` | yes (prod) | PayPal sandbox OAuth client secret. Must be set through the secret manager, never a `.env` in VCS. |
@@ -36,20 +47,27 @@ Environment variables:
 - Service type: `web`.
 - Build: `pip install -e ".[app]"`.
 - Start: `uvicorn bundlegraph_app.main:app --host 0.0.0.0 --port $PORT`.
+- Pre-deploy: `python -m bundlegraph_app.manage migrate`, followed by activation
+  of a reviewed normalized catalog through `activate-catalog`.
 - Health check path: `/healthz`.
 - Secrets are configured in Render's dashboard, not stored in the repository.
-- Prefer serving the UI and API from one origin. If they are separate, set
-  `BUNDLEGRAPH_FRONTEND_ORIGINS` to the exact HTTPS frontend origin.
+- Serve the UI and API from the same origin. The application composition mounts
+  `frontend/` after the API routes and adds a same-origin content-security policy.
 
 ## Durable storage
 
-The in-memory repositories in `persistence.py` are fine for the demo but lose
-state on restart. For hosted use, swap them for PostgreSQL-backed implementations
-of the same interfaces (`PlanRepository`, `ApprovalRepository`,
-`PaymentRepository`, `WebhookEventRepository`, `EvidenceReader`) and expose a
-migration under Render's postgres service. The ports include atomic payment
-operation creation (`create_if_absent`); the PostgreSQL adapter must enforce it
-with a unique constraint and a transaction, not an in-process lock.
+`PostgresPlanRepository`, `PostgresApprovalRepository`,
+`PostgresPaymentRepository`, `PostgresWebhookEventRepository`,
+`PostgresEvidenceReader`, `PostgresRequirementDraftRepository`,
+`PostgresCatalogRepository`, `PostgresPlanningInputsRepository`, and
+`PostgresResourceOwnershipRepository` implement the existing ports. Migrations
+`001` and `002` provide unique operation/idempotency constraints and ownership,
+draft, catalog, and immutable confirmation-snapshot records.
+
+The request flow is `guided draft -> clarification -> confirmation -> immutable
+catalog snapshot -> deterministic generation -> stored plan/evidence -> approval`.
+The authenticated subject owns every request, confirmation, plan, approval, and
+payment operation. Cross-owner reads intentionally return `404`.
 
 Plan versions persist merchant allocations that derive their recipients and
 amounts from stored line items. A payment request can select only a persisted

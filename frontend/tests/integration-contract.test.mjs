@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyAuthoritativeReplan, createAuthoritativePlan, getBackendReadiness, submitAuthoritativeApproval } from "../modules/api-client.js";
+import { applyAuthoritativeReplan, configureAccessToken, confirmRequirementDraft, createAuthoritativePlan, getBackendReadiness, saveGuidedRequirementDraft, submitAuthoritativeApproval } from "../modules/api-client.js";
 import { candidateCatalog } from "../modules/fixtures.js";
 import { filterCandidates } from "../modules/render-candidates.js";
 
@@ -22,9 +22,30 @@ test("plan creation sends references only, not browser-authored requirements", a
   await withFetch(async (_url, options) => { const body = JSON.parse(options.body); assert.deepEqual(Object.keys(body).sort(), ["confirmation_reference", "correlation_id", "proposal_key", "schema_version"]); return response({ plan: { plan_id: "plan-1" } }); }, () => createAuthoritativePlan("https://api.example", "confirmed-1", "proposal-1"));
 });
 
+test("guided draft and confirmation use authenticated server-owned transitions", async () => {
+  configureAccessToken("test-token");
+  let call = 0;
+  await withFetch(async (url, options) => {
+    assert.equal(options.headers.authorization, "Bearer test-token");
+    if (call++ === 0) {
+      assert.equal(url, "https://api.example/requirement-drafts/guided");
+      assert.equal(JSON.parse(options.body).request_reference, "req-1");
+      return response({ version: 1, can_confirm: true });
+    }
+    assert.equal(url, "https://api.example/requirement-drafts/req-1/confirm");
+    assert.deepEqual(JSON.parse(options.body), { expected_version: 1 });
+    return response({ confirmation_reference: "conf-1" });
+  }, async () => {
+    const draft = await saveGuidedRequirementDraft("https://api.example", { request_reference: "req-1" });
+    const confirmed = await confirmRequirementDraft("https://api.example", "req-1", draft.version);
+    assert.equal(confirmed.confirmation_reference, "conf-1");
+  });
+  configureAccessToken("");
+});
+
 test("approval binds to the stored plan version and total", async () => {
   const plan = { plan_id: "plan-1", current_version: 2, versions: [{ version: 2, fingerprint: "1234567890abcdef", total: { amount_minor: 67800, currency: "USD" } }] };
-  await withFetch(async (_url, options) => { const body = JSON.parse(options.body); assert.equal(body.plan_version, 2); assert.deepEqual(body.permitted_total, plan.versions[0].total); return response({ approval: { status: "granted" } }); }, () => submitAuthoritativeApproval("https://api.example", plan, "actor-1"));
+  await withFetch(async (_url, options) => { const body = JSON.parse(options.body); assert.equal(body.plan_version, 2); assert.deepEqual(body.permitted_total, plan.versions[0].total); assert.equal("actor_reference" in body, false); return response({ approval: { status: "granted" } }); }, () => submitAuthoritativeApproval("https://api.example", plan));
 });
 
 test("replan application refuses to invent a replacement payload", async () => {

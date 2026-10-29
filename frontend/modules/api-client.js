@@ -1,10 +1,13 @@
 const amount = (money) => typeof money?.amount_minor === "number" ? money.amount_minor / 100 : null;
+let accessToken = "";
+export const configureAccessToken = (token) => { accessToken = token.trim(); };
+const requestHeaders = () => ({ "content-type": "application/json", ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}) });
 
 async function requestJson(url, options = {}) {
   const response = await fetch(url, options);
   if (!response.ok) {
     let detail = "";
-    try { const payload = await response.json(); detail = payload.detail || payload.reason_codes?.join(", ") || ""; } catch { /* response had no JSON body */ }
+    try { const payload = await response.json(); detail = payload.detail || payload.reason_codes?.join(", ") || ""; if (detail && typeof detail !== "string") detail = JSON.stringify(detail); } catch { /* response had no JSON body */ }
     throw new Error(`Backend request failed with ${response.status}${detail ? `: ${detail}` : ""}.`);
   }
   return response.json();
@@ -35,25 +38,30 @@ export function normalizeBackendResponse(response) {
 }
 
 export async function requestBundlePlans(apiBase, confirmationReference) {
-  const payload = await requestJson(`${apiBase.replace(/\/$/, "")}/bundle-plans/generate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schema_version: "1.0", correlation_id: crypto.randomUUID(), confirmation_reference: confirmationReference }) });
+  const payload = await requestJson(`${apiBase.replace(/\/$/, "")}/bundle-plans/generate`, { method: "POST", headers: requestHeaders(), body: JSON.stringify({ schema_version: "1.0", correlation_id: crypto.randomUUID(), confirmation_reference: confirmationReference }) });
   return normalizeBackendResponse(payload);
 }
 
 export const getBackendReadiness = (apiBase) => requestJson(`${apiBase.replace(/\/$/, "")}/readyz`);
+export const getRuntimeConfig = (origin) => requestJson(`${origin.replace(/\/$/, "")}/runtime-config`);
 
 export async function createAuthoritativePlan(apiBase, confirmationReference, proposalKey) {
-  return requestJson(`${apiBase.replace(/\/$/, "")}/plans`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schema_version: "1.0", correlation_id: crypto.randomUUID(), confirmation_reference: confirmationReference, proposal_key: proposalKey }) });
+  return requestJson(`${apiBase.replace(/\/$/, "")}/plans`, { method: "POST", headers: requestHeaders(), body: JSON.stringify({ schema_version: "1.0", correlation_id: crypto.randomUUID(), confirmation_reference: confirmationReference, proposal_key: proposalKey }) });
 }
 
-export async function submitAuthoritativeApproval(apiBase, plan, actorReference) {
+export async function submitAuthoritativeApproval(apiBase, plan) {
   const version = plan.versions.find((item) => item.version === plan.current_version);
   if (!version) throw new Error("The authoritative plan response has no current version.");
-  return requestJson(`${apiBase.replace(/\/$/, "")}/approvals`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ plan_id: plan.plan_id, plan_version: version.version, plan_fingerprint: version.fingerprint, actor_reference: actorReference, permitted_total: version.total }) });
+  return requestJson(`${apiBase.replace(/\/$/, "")}/approvals`, { method: "POST", headers: requestHeaders(), body: JSON.stringify({ plan_id: plan.plan_id, plan_version: version.version, plan_fingerprint: version.fingerprint, permitted_total: version.total }) });
 }
 
-export const getPlanEvidence = (apiBase, planId) => requestJson(`${apiBase.replace(/\/$/, "")}/bundle-plans/${encodeURIComponent(planId)}/evidence?correlation_id=${encodeURIComponent(crypto.randomUUID())}`);
+export const getPlanEvidence = (apiBase, planId) => requestJson(`${apiBase.replace(/\/$/, "")}/bundle-plans/${encodeURIComponent(planId)}/evidence?correlation_id=${encodeURIComponent(crypto.randomUUID())}`, { headers: requestHeaders() });
 
 export async function applyAuthoritativeReplan(apiBase, planId, confirmationReference, replacementProposal) {
   if (!replacementProposal) throw new Error("A schema-validated replacement proposal is required.");
-  return requestJson(`${apiBase.replace(/\/$/, "")}/plans/${encodeURIComponent(planId)}/replans`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schema_version: "1.0", correlation_id: crypto.randomUUID(), confirmation_reference: confirmationReference, replacement: replacementProposal }) });
+  return requestJson(`${apiBase.replace(/\/$/, "")}/plans/${encodeURIComponent(planId)}/replans`, { method: "POST", headers: requestHeaders(), body: JSON.stringify({ schema_version: "1.0", correlation_id: crypto.randomUUID(), confirmation_reference: confirmationReference, replacement: replacementProposal }) });
 }
+
+export const saveRequirementDraft = (apiBase, draft) => requestJson(`${apiBase.replace(/\/$/, "")}/requirement-drafts`, { method: "POST", headers: requestHeaders(), body: JSON.stringify(draft) });
+export const saveGuidedRequirementDraft = (apiBase, draft) => requestJson(`${apiBase.replace(/\/$/, "")}/requirement-drafts/guided`, { method: "POST", headers: requestHeaders(), body: JSON.stringify(draft) });
+export const confirmRequirementDraft = (apiBase, requestReference, expectedVersion) => requestJson(`${apiBase.replace(/\/$/, "")}/requirement-drafts/${encodeURIComponent(requestReference)}/confirm`, { method: "POST", headers: requestHeaders(), body: JSON.stringify({ expected_version: expectedVersion }) });
