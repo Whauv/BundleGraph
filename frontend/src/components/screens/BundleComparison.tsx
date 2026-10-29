@@ -1,8 +1,6 @@
 
-import React, { useState } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
 import { useDemo } from '../../store/demoStore';
-import { BundleGrid } from '../grid/BundleGrid';
-import { EvidenceGraph } from '../graph/EvidenceGraph';
 import { ScheduleTimeline } from '../timeline/ScheduleTimeline';
 import { 
   Table, 
@@ -16,6 +14,9 @@ import {
   Lock,
   Layers
 } from 'lucide-react';
+
+const BundleGrid = lazy(() => import('../grid/BundleGrid').then((module) => ({ default: module.BundleGrid })));
+const EvidenceGraph = lazy(() => import('../graph/EvidenceGraph').then((module) => ({ default: module.EvidenceGraph })));
 
 export const BundleComparison: React.FC = () => {
   const {
@@ -329,9 +330,11 @@ export const BundleComparison: React.FC = () => {
 
           {/* Active Tab View */}
           <div>
-            {activeTab === 'grid' && <BundleGrid proposal={selectedProposal} />}
-            {activeTab === 'graph' && <EvidenceGraph report={selectedProposal?.compatibility_report} />}
-            {activeTab === 'timeline' && <ScheduleTimeline deadlineDays={7} isDelayed={false} />}
+            <Suspense fallback={<div className="empty-state" role="status">Loading comparison view…</div>}>
+              {activeTab === 'grid' && <BundleGrid proposal={selectedProposal} />}
+              {activeTab === 'graph' && <EvidenceGraph report={selectedProposal?.compatibility_report} />}
+              {activeTab === 'timeline' && <ScheduleTimeline deadlineDays={7} isDelayed={false} />}
+            </Suspense>
           </div>
         </div>
 

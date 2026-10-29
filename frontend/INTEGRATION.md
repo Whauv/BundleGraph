@@ -1,63 +1,40 @@
 # Frontend integration and release contract
 
-The frontend has three explicit runtime states. It never infers a stronger state
-from a successful network request.
+The React application is the repository's only frontend. It has two explicit
+runtime modes and never infers a stronger state from a successful request.
 
-| Mode | How selected | Allowed behavior |
+| Mode | Selection | Behavior |
 | --- | --- | --- |
-| Fixture demo | No `apiBase` query parameter | Synthetic discovery, planning, approval simulation, and recovery illustration only |
-| Backend connected, not ready | `apiBase` set; `/readyz` returns `not_ready` | Read-only generation may be attempted; authoritative writes are disabled |
-| Backend ready | `apiBase` set; `/readyz` returns `ready` | Generate, create a stored plan, retrieve its evidence, and submit approval through documented Member 2 routes |
+| Synthetic fixture | `VITE_BUNDLEGRAPH_DEMO_API_BASE` is unset | Uses versioned offline examples and labels every approval/execution result as simulated |
+| Connected demo API | `VITE_BUNDLEGRAPH_DEMO_API_BASE` is set | Calls only the `/api/*` demonstration bridge and fails visibly on network or server errors |
 
-Use `?apiBase=http://127.0.0.1:8080` when running the local API. Do not place
-credentials, PayPal identifiers, merchant recipients, or provider keys in the
-URL or browser code.
+The connected demo API is not Member 2's authoritative persistence/payment
+boundary. It exists for the hackathon walkthrough. Production integration must
+use `bundlegraph_app` and preserve these rules:
 
-When UI and API use different origins, the API must set
-`BUNDLEGRAPH_FRONTEND_ORIGINS=http://127.0.0.1:5173` (or the exact deployed HTTPS
-origin). Wildcards, URL paths, embedded credentials, and non-HTTP(S) origins are
-rejected. Prefer a same-origin reverse proxy for production.
+1. Submit a confirmation reference, not browser-authored confirmed requirements.
+2. Persist the selected proposal before approval.
+3. Retrieve evidence for the stored plan.
+4. Approve the exact stored version, fingerprint, total, and merchant allocation.
+5. Apply a schema-validated replan as a new version and require new approval.
+6. Keep authentication, PayPal, provider, and merchant credentials server-side.
 
-## Documented routes used
-
-| Route | Frontend use |
-| --- | --- |
-| `GET /readyz` | Runtime readiness banner and fail-closed write gating |
-| `POST /bundle-plans/generate` | Resolve an authoritative confirmation reference and receive proposals |
-| `POST /plans` | Persist the selected backend proposal before approval |
-| `GET /bundle-plans/{plan_id}/evidence` | Confirm persisted evidence is available |
-| `POST /approvals` | Submit approval for the exact stored version, fingerprint, and total |
-| `POST /plans/{plan_id}/replans` | Adapter exists, but is called only with a complete schema-validated replacement proposal supplied by the backend workflow |
-
-There is no catalog discovery route in the repository. The browse experience is
-therefore synthetic and isolated from selected proposals. There is also no route
-that generates a replan proposal from a failure event. The frontend shows this as
-a blocked live action rather than fabricating the replacement payload.
-
-## Contract scenarios
-
-The deterministic fixtures cover a verified proposal, an incomplete/unknown
-proposal, missing accessories, stale evidence, unknown shipping/tax, a recovery
-illustration, and provider/backend unavailability. `tests/integration-contract.test.mjs`
-checks that plan creation sends references rather than browser-authored confirmed
-requirements and that approval uses the stored plan version and total.
+`VITE_BUNDLEGRAPH_DEMO_API_BASE` is a public browser setting, not a secret. For
+production, prefer a same-origin reverse proxy and remove the demo API setting.
 
 ## Release checks
 
 ```powershell
+npm --prefix frontend ci
 npm --prefix frontend run check
-python -m pytest -q --ignore=tests/test_app_api.py
 ```
 
-The opt-in live smoke check requires a running backend and makes only liveness and
-readiness requests:
+An opt-in smoke test can check Member 2 liveness/readiness independently:
 
 ```powershell
 $env:BUNDLEGRAPH_FRONTEND_API_BASE="http://127.0.0.1:8080"
 npm --prefix frontend run check:live
 ```
 
-`BUNDLEGRAPH_FRONTEND_API_BASE` is a test-runner variable, not a browser secret.
-Backend deployment still requires the server-side variables documented in the
-root `.env.example` and `docs/member2/deployment.md`. No frontend environment
-variable contains a credential.
+No frontend command requires provider credentials for fixture mode or normal
+tests.

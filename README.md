@@ -79,21 +79,22 @@ The interactive [Member 1 intelligence-boundary diagram](docs/architecture/membe
 
 `bundlegraph.models` contains the shared contracts. `bundlegraph.catalog` contains the explicitly labeled offline fixture catalog. `bundlegraph.compatibility_graph` evaluates deterministic compatibility, `bundlegraph.selection` performs bounded exact search, and `bundlegraph.interpretation` provides injectable requirement extraction.
 
-## Member 3 frontend demo
+## Member 3 frontend
 
-The dependency-free [Member 3 frontend](frontend/README.md) provides the planned
-five-screen, resettable demo journey: request builder, requirements review,
-bundle comparison with evidence and graph, plan approval, and execution/recovery.
-It starts in explicit fixture mode and makes no payment/provider request. Run it
-locally with:
+The repository has one [React and TypeScript frontend](frontend/README.md) with
+the five-screen journey: request builder, requirements review, bundle comparison
+with evidence and graph, plan approval, and execution/recovery. It starts in
+explicit synthetic fixture mode and makes no provider or payment call.
 
 ```powershell
-python -m http.server 5173 --directory frontend
+npm --prefix frontend ci
+npm --prefix frontend run dev
 ```
 
-The UI can be pointed at an authoritative backend for generation experiments with
-`?apiBase=http://127.0.0.1:8080`; it retains fixture fallback if that backend is
-not configured. See the frontend readme for exact integration limits.
+Open `http://127.0.0.1:5173`. An optional, explicitly non-authoritative demo API
+can be configured with `VITE_BUNDLEGRAPH_DEMO_API_BASE`; configured API failures
+are shown as errors and never replaced by fixture success. See the frontend
+readme for the exact integration and production boundaries.
 
 ## Channel3 discovery
 

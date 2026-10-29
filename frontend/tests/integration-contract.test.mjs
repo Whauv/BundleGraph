@@ -1,32 +1,42 @@
-import assert from "node:assert/strict";
-import test from "node:test";
-import { applyAuthoritativeReplan, createAuthoritativePlan, getBackendReadiness, submitAuthoritativeApproval } from "../modules/api-client.js";
-import { candidateCatalog } from "../modules/fixtures.js";
-import { filterCandidates } from "../modules/render-candidates.js";
+import assert from 'node:assert/strict';
+import { access, readFile } from 'node:fs/promises';
+import test from 'node:test';
 
-const withFetch = async (handler, action) => { const original = globalThis.fetch; globalThis.fetch = handler; try { return await action(); } finally { globalThis.fetch = original; } };
-const response = (payload, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => payload });
+const root = new URL('../', import.meta.url);
+const indexSource = await readFile(new URL('index.html', root), 'utf8');
+const packageJson = JSON.parse(await readFile(new URL('package.json', root), 'utf8'));
+const clientSource = await readFile(new URL('src/api/client.ts', root), 'utf8');
 
-test("candidate filters never convert draft candidates into proposals", () => {
-  const filtered = filterCandidates(candidateCatalog, { category: "interface", availability: "available", evidence: "complete", maximumPrice: "200" });
-  assert.equal(filtered.length, 1);
-  assert.equal(filtered[0].id, "candidate-interface-solo");
-  assert.ok(filtered.every((item) => !Object.hasOwn(item, "classification")));
+test('Vite React is the only frontend entry point', async () => {
+  assert.match(indexSource, /src="\/src\/main\.tsx"/);
+  assert.doesNotMatch(indexSource, /app\.js|styles\.css/);
+  await assert.rejects(() => access(new URL('app.js', root)));
+  await assert.rejects(() => access(new URL('modules/api-client.js', root)));
 });
 
-test("readiness uses the documented readyz endpoint", async () => {
-  await withFetch(async (url) => { assert.equal(url, "https://api.example/readyz"); return response({ status: "ready", checks: {} }); }, async () => assert.equal((await getBackendReadiness("https://api.example/" )).status, "ready"));
+test('package scripts validate and build the canonical frontend', () => {
+  assert.match(packageJson.scripts.check, /lint/);
+  assert.match(packageJson.scripts.check, /tsc -b/);
+  assert.match(packageJson.scripts.check, /node --test/);
+  assert.match(packageJson.scripts.check, /build/);
+  assert.equal(packageJson.dependencies.react.startsWith('^19'), true);
 });
 
-test("plan creation sends references only, not browser-authored requirements", async () => {
-  await withFetch(async (_url, options) => { const body = JSON.parse(options.body); assert.deepEqual(Object.keys(body).sort(), ["confirmation_reference", "correlation_id", "proposal_key", "schema_version"]); return response({ plan: { plan_id: "plan-1" } }); }, () => createAuthoritativePlan("https://api.example", "confirmed-1", "proposal-1"));
+test('configured demo backend errors cannot silently fall back to fixtures', () => {
+  assert.match(clientSource, /if \(!DEMO_API_BASE\) return cloneFixture\(fixture\)/);
+  assert.match(clientSource, /Fixture data was not substituted/);
+  assert.doesNotMatch(clientSource, /http:\/\/localhost:8000/);
 });
 
-test("approval binds to the stored plan version and total", async () => {
-  const plan = { plan_id: "plan-1", current_version: 2, versions: [{ version: 2, fingerprint: "1234567890abcdef", total: { amount_minor: 67800, currency: "USD" } }] };
-  await withFetch(async (_url, options) => { const body = JSON.parse(options.body); assert.equal(body.plan_version, 2); assert.deepEqual(body.permitted_total, plan.versions[0].total); return response({ approval: { status: "granted" } }); }, () => submitAuthoritativeApproval("https://api.example", plan, "actor-1"));
-});
-
-test("replan application refuses to invent a replacement payload", async () => {
-  await assert.rejects(() => applyAuthoritativeReplan("https://api.example", "plan-1", "confirmed-1", null), /schema-validated replacement/);
+test('all browser mutations stay behind the explicit demo API namespace', () => {
+  for (const route of [
+    '/api/requirements/interpret',
+    '/api/requirements/confirm',
+    '/api/bundle-plans/generate',
+    '/api/bundle-plans/replan',
+    '/api/approvals/create',
+    '/api/executions/simulate',
+  ]) {
+    assert.match(clientSource, new RegExp(route.replaceAll('/', '\\/')));
+  }
 });

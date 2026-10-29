@@ -3,7 +3,7 @@ import { useDemo } from '../../store/demoStore';
 import { Layers, RotateCcw, SlidersHorizontal, User } from 'lucide-react';
 
 export const Header: React.FC = () => {
-  const { presets, activePresetId, loadPreset, resetAll, isLoading } = useDemo();
+  const { presets, activePresetId, loadPreset, resetAll, isLoading, runtimeMode, runtimeLabel } = useDemo();
 
   return (
     <header className="main-header" style={{ padding: 0, gap: 0, borderBottom: 'none' }}>
@@ -71,7 +71,7 @@ export const Header: React.FC = () => {
                 boxShadow: '0 0 8px #00e575',
               }}
             />
-            <span>PayPal Sandbox v2: Active</span>
+            <span>{runtimeLabel}</span>
           </div>
 
           <div
@@ -146,7 +146,12 @@ export const Header: React.FC = () => {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', color: '#666666' }}>
-          <span>Topology Solver: <strong style={{ color: '#00e575' }}>DETERMINISTIC_PASS</strong></span>
+          <span>
+            Runtime:{' '}
+            <strong style={{ color: runtimeMode === 'fixture' ? '#fabc45' : '#00e575' }}>
+              {runtimeMode === 'fixture' ? 'FIXTURE_ONLY' : 'DEMO_API_CONNECTED'}
+            </strong>
+          </span>
         </div>
       </div>
     </header>
