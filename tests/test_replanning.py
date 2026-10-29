@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from bundlegraph.catalog import OFFLINE_FIXTURE_CATALOG
 from bundlegraph.models import AvailabilityStatus, ConfirmedRequirements, FreshnessStatus, LaptopConnectorFact, ListeningRequirement, Money, QuantityRequirement
-from bundlegraph.replanning import ExecutionFact, ExecutionState, LockedComponent, ReplanRequest, RecoveryStatus, replan_bundle
+from bundlegraph.replanning import ExecutionFact, ExecutionState, LockedComponent, MoneyDelta, ReplanRequest, RecoveryStatus, replan_bundle
 from bundlegraph.selection import BundleSelectionRequest, SolverLimits, select_bundles
 
 
@@ -81,3 +81,7 @@ def test_known_and_unknown_recovery_costs_are_structured() -> None:
     assert proposal.recovery_cost.confirmed_amount.amount_minor == 500
     assert proposal.recovery_cost.unknown_offer_ids == ("offer-mic-alpha",)
     assert "RECOVERY_COST_UNKNOWN" in proposal.material_change_reasons
+
+
+def test_cost_difference_supports_a_cheaper_replacement() -> None:
+    assert MoneyDelta(amount_minor=-500, currency="USD").amount_minor == -500

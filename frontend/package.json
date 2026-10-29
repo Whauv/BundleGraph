@@ -1,9 +1,33 @@
 {
   "name": "bundlegraph-frontend",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check app.js && node --test tests/fixture-contract.test.mjs tests/integration-contract.test.mjs",
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "lint": "oxlint src vite.config.ts",
+    "typecheck": "tsc -b",
+    "test": "node --test tests/*.test.mjs",
+    "check": "oxlint src vite.config.ts && tsc -b && node --test tests/*.test.mjs && vite build",
     "check:live": "node --test tests/live-smoke.test.mjs"
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.12.0",
+    "ag-grid-community": "^36.2.0",
+    "ag-grid-react": "^36.2.0",
+    "lucide-react": "^1.61.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "oxlint": "^1.88.0",
+    "typescript": "~6.0.3",
+    "vite": "^8.3.4"
   }
 }

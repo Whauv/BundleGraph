@@ -94,9 +94,9 @@ export const RequestBuilder: React.FC = () => {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.625rem' }}>
-          <span style={{ color: '#666666', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Active Model:</span>
+          <span style={{ color: '#666666', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Extraction mode:</span>
           <span style={{ padding: '0.15rem 0.4rem', borderRadius: '2px', backgroundColor: '#111111', border: '1px solid #222222', color: '#ffffff' }}>
-            gemini-1.5-pro-deterministic
+            schema-validated fixture/demo adapter
           </span>
         </div>
       </div>

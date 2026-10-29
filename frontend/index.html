@@ -1,93 +1,17 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>BundleGraph demo</title>
-    <link rel="stylesheet" href="styles.css">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="BundleGraph evidence-backed podcast equipment bundle planning demo"
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>BundleGraph</title>
   </head>
   <body>
-    <a class="skip-link" href="#main-content">Skip to main content</a>
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">BundleGraph · Member 3 experience</p>
-        <h1>Build a podcast setup you can explain.</h1>
-      </div>
-      <div class="header-actions">
-        <span id="mode-badge" class="badge fixture">Curated fixture demo</span>
-        <button id="reset" class="button secondary">Reset demo</button>
-      </div>
-    </header>
-
-    <main id="main-content" tabindex="-1">
-      <div class="notice" role="status">
-        Fixture inventory and simulated payment events are clearly labeled. Unknown evidence and delivery timing stay unknown.
-      </div>
-      <div id="app-status" class="status-message" role="status" aria-live="polite" hidden></div>
-      <nav aria-label="Demo journey" class="journey" id="journey"></nav>
-
-      <section id="screen-request" class="screen" aria-labelledby="request-title">
-        <div class="section-heading"><p class="step">1 · Request</p><h2 id="request-title">Tell us what has to work.</h2></div>
-        <form id="request-form" class="panel form-grid">
-          <fieldset class="wide"><legend>Start with a goal</legend><div id="use-case-suggestions" class="choice-row"></div></fieldset>
-          <label>Use case
-            <input name="useCase" list="use-case-options" value="Two-person podcast" required aria-describedby="use-case-help">
-            <datalist id="use-case-options"><option value="Two-person podcast"><option value="Remote interview"><option value="Voice-over recording"><option value="Music rehearsal capture"></datalist>
-            <small id="use-case-help">Choose a suggestion or describe the recording setup you need.</small>
-          </label>
-          <label>Budget (USD)<input name="budget" type="number" min="1" value="900" required><span id="budget-help" class="input-help">Choose a preset or enter your maximum spend.</span></label>
-          <fieldset><legend>Budget presets</legend><div id="budget-presets" class="choice-row compact"></div></fieldset>
-          <label>Participants
-            <select name="participants"><option value="1">1 person</option><option value="2" selected>2 people</option><option value="3">3 people</option><option value="4">4 people</option><option value="unknown">I’m not sure</option></select>
-          </label>
-          <fieldset class="wide"><legend>Laptop connectors</legend><p class="muted">Select every port you can use. “I’m not sure” keeps this requirement explicit for review.</p><div id="connector-options" class="choice-row"></div><details><summary>How do I identify my laptop port?</summary><p>USB-C is a small rounded oval. USB-A is the larger rectangular port. A 3.5 mm headphone jack is circular. Check the laptop’s side or its manufacturer support page.</p></details></fieldset>
-          <details class="wide panel advanced-fields"><summary>Advanced details: deadline and backend reference</summary><div class="form-grid"><label>Deadline <input name="deadline" type="date"><small>Optional. Availability does not prove an arrival date.</small></label><label>Confirmed request reference <input name="confirmationReference" placeholder="Optional; required for backend generation"><small>Only enter a reference issued by the authoritative backend.</small></label></div></details>
-          <fieldset class="wide"><legend>Listening requirement</legend><div id="monitoring-options" class="choice-row"></div></fieldset>
-          <div class="wide action-row"><button class="button" type="submit">Review requirements</button><button class="button secondary" id="sample-request" type="button">Load sample request</button></div>
-          <div id="request-error" class="form-error" role="alert" hidden></div>
-        </form>
-      </section>
-
-      <section id="screen-review" class="screen" aria-labelledby="review-title" hidden>
-        <div class="section-heading"><p class="step">2 · Review</p><h2 id="review-title">Confirm constraints before planning.</h2></div>
-        <div id="requirements-review" class="panel"></div>
-        <div class="action-row"><button class="button" id="confirm-requirements">Confirm and compare bundles</button><button class="button secondary back" data-target="request">Edit request</button></div>
-      </section>
-
-      <section id="screen-compare" class="screen" aria-labelledby="compare-title" hidden>
-        <div class="section-heading"><p class="step">3 · Compare</p><h2 id="compare-title">Compare complete alternatives, not isolated bargains.</h2></div>
-        <details class="panel candidate-browser"><summary>Browse synthetic candidate products</summary><p class="notice">Draft discovery only. Shortlisting a candidate does not make it compatible and does not change the solver response. No provider is queried.</p><form id="candidate-filters" class="candidate-filters"><label>Category<select name="category"><option value="all">All categories</option><option value="microphone">Microphones</option><option value="interface">Interfaces</option><option value="cable">Cables</option><option value="monitoring">Monitoring</option><option value="adapter">Adapters</option></select></label><label>Availability<select name="availability"><option value="all">Any status</option><option value="available">Available</option><option value="out_of_stock">Out of stock</option></select></label><label>Evidence<select name="evidence"><option value="all">Any evidence state</option><option value="complete">Complete</option><option value="missing">Missing</option><option value="stale">Stale</option></select></label><label>Maximum unit price<input name="maximumPrice" type="number" min="0" placeholder="No limit"></label><button id="clear-candidate-filters" class="button secondary" type="button">Clear filters</button></form><p id="candidate-count" class="muted" aria-live="polite"></p><div id="candidate-results" class="candidate-results"></div></details>
-        <div class="comparison-shell">
-          <aside id="bundle-status" class="panel bundle-status" aria-label="Inspected bundle status"></aside>
-          <div class="comparison-content"><div id="comparison-table"></div><div id="bundle-cards" class="bundle-cards"></div></div>
-        </div>
-        <div class="compare-layout">
-          <article class="panel"><h3>Compatibility dependency graph</h3><p class="muted">Select a component or connection to inspect its role, check, and source evidence.</p><div id="graph" class="graph" aria-label="Compatibility graph"></div><details><summary>Readable graph alternative</summary><ul id="graph-alternative"></ul></details></article>
-          <article class="panel graph-detail"><h3>Selected component</h3><div id="graph-detail" aria-live="polite"></div></article>
-          <article class="panel"><h3>Evidence and checks</h3><p class="muted">Select a finding to inspect the recorded observation. Selecting an evidence reference also highlights graph relationships that use it.</p><div id="findings"></div><div id="evidence-inspector" aria-live="polite"></div></article>
-        </div>
-        <section class="education" aria-labelledby="education-title"><div><p class="eyebrow">Gear guide</p><h3 id="education-title">Understand the technical checks</h3></div><div class="education-grid"><details class="panel"><summary>XLR connectors</summary><p>A common locking three-pin microphone connection. A specific product is only treated as matching when evidence supports both ends.</p></details><details class="panel"><summary>Phantom power</summary><p>Electrical power supplied by some interfaces to compatible microphones that require it. Missing support evidence remains unknown.</p></details><details class="panel"><summary>Simultaneous microphone inputs</summary><p>Two participants using separate XLR microphones generally require two inputs that can be used at the same time.</p></details><details class="panel"><summary>Independent monitoring</summary><p>Each participant can listen through suitable headphone equipment. The exact requirement comes from the confirmed request.</p></details></div></section>
-      </section>
-
-      <section id="screen-approval" class="screen" aria-labelledby="approval-title" hidden>
-        <div class="section-heading"><p class="step">4 · Approval</p><h2 id="approval-title">Approve one exact plan version.</h2></div>
-        <div id="approval-summary" class="panel"></div>
-        <div id="authoritative-approval-fields" class="panel" hidden><label>Approval actor reference<input id="actor-reference" autocomplete="off" placeholder="Identity reference supplied by Member 2 authentication"><small>This is sent only to the configured authoritative backend. Do not enter a password or secret.</small></label></div>
-        <label class="consent"><input id="approval-checkbox" type="checkbox"> I reviewed this exact plan version, components, total, and merchant allocation.</label>
-        <div class="action-row"><button class="button" id="approve-plan" disabled>Simulate fixture approval</button><button class="button secondary back" data-target="compare">Back to comparison</button></div>
-      </section>
-
-      <section id="screen-recovery" class="screen" aria-labelledby="recovery-title" hidden>
-        <div class="section-heading"><p class="step">5 · Execute & recover</p><h2 id="recovery-title">Keep recovery visible and reviewable.</h2></div>
-        <div class="two-column">
-          <article id="execution-status" class="panel"></article>
-          <article class="panel"><h3>Schedule consequences</h3><p class="muted">Illustrative assembly timeline; availability does not prove arrival dates.</p><ol id="schedule" class="timeline"></ol></article>
-        </div>
-        <div class="panel recovery-panel"><h3>Simulated stock failure</h3><p>Use this controlled scenario to show a replacement proposal. It never performs a cancellation, refund, or purchase.</p><button id="simulate-failure" class="button danger">Simulate unavailable interface</button><div id="recovery-result"></div></div>
-        <div id="notification" class="notice notification" hidden></div>
-      </section>
-    </main>
-    <footer>BundleGraph demo · deterministic fixture data · no live merchant or payment claims</footer>
-    <script type="module" src="app.js"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

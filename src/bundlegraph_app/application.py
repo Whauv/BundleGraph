@@ -116,6 +116,7 @@ class ApplicationService:
             line_items=line_items,
             total=total,
             merchant_allocations=allocations,
+            bundle_proposal=data.proposal,
         )
         fingerprint = plan_version_fingerprint(version_payload)
         now = self._now()
@@ -151,6 +152,10 @@ class ApplicationService:
         plan.updated_at = self._now()
         self._plans.save(plan)
         return plan
+
+    def get_plan(self, plan_id: str) -> Plan:
+        """Return an authoritative plan or fail without exposing repository details."""
+        return self._require_plan(plan_id)
 
     # ------------------------------------------------------------------
     # Approvals
@@ -453,6 +458,7 @@ class ApplicationService:
             line_items=line_items,
             total=total,
             merchant_allocations=allocations,
+            bundle_proposal=data.replacement.replacement,
         )
         fingerprint = plan_version_fingerprint(payload)
         now = self._now()
@@ -627,8 +633,9 @@ def _plan_version_payload(
     line_items: Iterable[PlanLineItem],
     total: Money,
     merchant_allocations: Iterable[MerchantAllocation],
+    bundle_proposal: BundleProposal | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "plan_id": plan_id,
         "version": version,
         "confirmation_reference": confirmation_reference,
@@ -636,6 +643,9 @@ def _plan_version_payload(
         "total": total.model_dump(mode="json"),
         "merchant_allocations": [item.model_dump(mode="json") for item in merchant_allocations],
     }
+    if bundle_proposal is not None:
+        payload["bundle_proposal"] = bundle_proposal.model_dump(mode="json")
+    return payload
 
 
 def _result_to_status(status: PayPalResultStatus) -> PaymentOperationStatus:

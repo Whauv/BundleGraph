@@ -39,23 +39,40 @@ multi-merchant plans, every shipping and tax value must be known per checkout li
 bounded allowances are intentionally rejected because they cannot be allocated
 between merchants safely.
 
-## Live sandbox client (to-do, Nov 2–5)
+## Opt-in live sandbox validator
 
-The current application deliberately does not enable a live client. PayPal's
-Payments v2 capture, void, and refund APIs operate on an existing authorization
-or capture ID; creating an authorization requires the separate Orders buyer-
-approval flow. Do not replace the fake client until that server-side flow,
-durable operation idempotency, and signature verification are configured.
+`PayPalSandboxOrdersClient` implements the documented sandbox-only OAuth,
+Orders v2 create/authorize, Payments v2 capture/void/refund, and webhook postback
+verification calls. `python -m bundlegraph_app.paypal_smoke` deliberately uses a
+two-step workflow because a buyer must approve an `AUTHORIZE` order before the
+server can authorize funds. It is a validator, not the application's enabled
+payment transport; `application` mode remains fail-closed for payments.
 
-The production implementation calls `/v2/payments/authorizations`,
-`/v2/payments/captures`, and `/v2/payments/refunds` with:
+Verified official references on 2026-10-28:
+
+- https://developer.paypal.com/api/rest/authentication
+- https://developer.paypal.com/api/rest/integration/orders-api
+- https://developer.paypal.com/api/payments/v2
+- https://developer.paypal.com/api/rest/webhooks/rest/
+
+No credential was available in the implementation environment, so no sandbox
+call is reported as passed. Offline transport-contract tests verify exact sandbox
+paths, request IDs, amount formatting, response extraction, and signature-postback
+shape without claiming provider success.
+
+After approving the order created by the CLI, the same capture/refund lifecycle
+can be run as an opt-in test by setting `BUNDLEGRAPH_RUN_PAYPAL_SMOKE=1` and
+`PAYPAL_APPROVED_ORDER_ID`, then running
+`python -m pytest -q tests/test_paypal_sandbox_live.py`. Normal CI skips it.
+
+The validator calls the documented order-specific and payment-resource endpoints
+with:
 
 - OAuth client-credentials grant, token cached in memory with the server-reported
   expiry minus a safety margin.
 - `PayPal-Request-Id: <adapter idempotency key>` on every money-moving call.
-- `PayPal-Auth-Assertion` for merchant-of-record operations.
 - Webhook verification via `/v1/notifications/verify-webhook-signature` before
-  calling `ApplicationService.record_webhook_event` with `verified=True`.
+  any future application integration treats an event as verified.
 
 Operator checklist before enabling the live client:
 

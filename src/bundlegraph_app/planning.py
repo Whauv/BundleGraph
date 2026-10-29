@@ -20,6 +20,7 @@ class AuthoritativePlanningInputs:
 
     requirements: ConfirmedRequirements
     catalog: FixtureCatalog
+    owner_subject: str = "test-user"
 
     def merchant_lookup(self) -> dict[str, str]:
         return {offer.offer_id: offer.merchant_reference for offer in self.catalog.offers}

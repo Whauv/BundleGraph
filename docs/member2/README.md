@@ -13,9 +13,10 @@ add compatibility, solver, or research logic.
 | Phase (per team proposal) | Deliverable | Status |
 | --- | --- | --- |
 | Oct 22–24: validate hardest dependencies | PayPal lifecycle paths (authorize/capture/void/refund) proven against an in-process sandbox fake with idempotency and allowlist | shipped |
-| Oct 25–28: deliver vertical slice | request → bundle → approval → sandbox authorize + capture | shipped (offline fixtures) |
+| Oct 25–28: deliver vertical slice | owned draft → clarification → confirmation/catalog snapshot → bundle → stored evidence/approval | shipped (PostgreSQL application mode; synthetic local catalog available) |
 | Nov 2–5: implement recovery | replan supersession invalidates the prior approval; webhook duplicates/out-of-order deliveries are a no-op | shipped |
-| Nov 2–5: deployment | FastAPI entrypoint `bundlegraph_app.main:app`; render service note below | shipped (local) |
+| Nov 2–5: deployment | FastAPI entrypoint, migrations, PostgreSQL adapters, auth/ownership, readiness, same-origin frontend | shipped (planning/approval); live PayPal remains blocked |
+| Hardening follow-up | Candidate discovery, generated replanning, structured HTTP logs, container sandbox, CI, PayPal sandbox validator | shipped locally; external deployment and live PayPal run remain opt-in/blocked |
 
 ## Key design decisions
 
@@ -39,30 +40,34 @@ add compatibility, solver, or research logic.
   prior granted approval `INVALIDATED` — material substitutions require a new
   approval even if the previous recipient and total happen to match.
 - **Repositories are ports.** `ApplicationService` depends on repository protocols;
-  deterministic in-memory implementations are only the demo/test adapter. A PostgreSQL
-  implementation must preserve their atomic `create_if_absent` semantics.
+  deterministic in-memory implementations are only the demo/test adapter. The
+  PostgreSQL implementations persist requirements, catalogs, immutable planning
+  snapshots, ownership, plans, approvals, evidence, payments, and webhook events.
 - **Submitted operations are recoverable.** Repeating an operation, or calling
   `POST /payments/reconcile`, reads the provider's idempotency result. It never sends
   another money-moving request. A real provider adapter must implement that read path.
+- **Discovery is not selection.** `/candidates/discover` returns labeled draft
+  candidates from the active catalog or configured Channel3 adapter; it never
+  mutates a confirmation snapshot or bypasses Member 1's solver.
+- **Replan generation is not replan application.** The generation route uses the
+  stored proposal and confirmation snapshot, while the existing apply route alone
+  creates a successor version and invalidates approval.
 
-## Running the demo backend
+## Running the durable planning backend
 
 ```powershell
 python -m pip install -e ".[app]"
+# Configure DATABASE_URL and BUNDLEGRAPH_AUTH_IDENTITIES as shown in deployment.md
+python -m bundlegraph_app.manage migrate
+python -m bundlegraph_app.manage activate-local-demo-catalog
+$env:BUNDLEGRAPH_MODE="application"
 python -m uvicorn bundlegraph_app.main:app --port 8080
 ```
 
-With no PayPal credentials, the deployment uses the deterministic in-process
-sandbox and the in-memory repositories. `build_demo_app()` is the explicit demo
-composition root. `build_production_app()` validates production settings and fails
-closed until PostgreSQL, authentication, PayPal Orders, and webhook-verification
-adapters are supplied.
-
-The local planning-input repository starts empty and fails closed. A demo or
-integration test must register an `AuthoritativePlanningInputs` record under an
-existing confirmation reference before calling the generate, plan, or replan routes.
-The selected proposal's referenced evidence is persisted through the Member 2
-`EvidenceReader`, so Member 3 can retrieve it through the evidence route.
+The application runtime serves the browser at `/` and discovers the API through
+`/runtime-config`. Its payment adapter is explicitly disabled. `demo` remains an
+offline fixture composition; `production` validates its settings and fails closed
+until real PayPal Orders and webhook verification are wired.
 
 ## Tests
 

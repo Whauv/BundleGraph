@@ -18,6 +18,7 @@ from bundlegraph.models import (
 )
 
 from bundlegraph_app.api import AuthoritativePlanningRequest, AuthorizePaymentBody, _generate_from_authoritative_inputs, build_app
+from bundlegraph_app.auth import TestingAuthenticationProvider
 from bundlegraph_app.application import ApplicationService
 from bundlegraph_app.paypal import FakeSandboxClient, PayPalAdapter
 from bundlegraph_app.persistence import new_in_memory_repositories
@@ -80,7 +81,7 @@ def _client():
         now=lambda: datetime(2026, 10, 25, 12, tzinfo=UTC),
     )
     planning = _planning_inputs(catalog)
-    return TestClient(build_app(service, evidence_reader, planning)), catalog
+    return TestClient(build_app(service, evidence_reader, planning, authentication_provider=TestingAuthenticationProvider())), catalog
 
 
 def test_generation_resolves_confirmation_inputs_without_a_client_catalog():
