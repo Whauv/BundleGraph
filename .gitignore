@@ -3,3 +3,16 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 .venv/
+.env
+.env.local
+*.env
+
+# Skills & AI Agent customizations
+.agents/
+skills/
+
+# PDF execution plans and documents
+*.pdf
+
+# Stitch Redesign Assets
+docs/stitch_redesign/

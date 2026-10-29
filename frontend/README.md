@@ -1,96 +1,57 @@
-# BundleGraph Member 3 demo UI
+# BundleGraph frontend
 
-This is a dependency-free, fixture-first frontend for the BundleGraph demo. It
-implements the five planned screens: request builder, requirements review,
-bundle comparison, plan approval, and execution/recovery. It intentionally
-labels fixture inventory, simulated payment events, and simulated notifications.
-
-The request builder includes selectable use cases, budget presets, participant,
-connector, and listening choices, plus guidance for identifying laptop ports.
-Changing a requirement invalidates a prior bundle selection. The dependency graph
-supports mouse and keyboard selection of components and relationships, then shows
-their role, compatibility finding, and evidence reference in the detail panel.
-Comparison cards expose quantities, synthetic line-item prices, shipping/tax
-status, total, budget difference, and compatibility outcome. Incomplete fixture
-options can be inspected to see the blocking evidence but cannot be selected for
-approval. Selecting evidence shows its reference, source, observation timestamp,
-freshness, conflict state, and missing fact; matching graph nodes and edges are
-highlighted.
-
-The review screen supports editing one requirement at a time without clearing the
-draft. The approval screen identifies the selected plan version, exact total,
-cost-status fields, and merchant allocation. Fixture approval is deliberately a
-local simulation. Recovery presents a structured before/after delta and sends the
-user back to compare the revised fixture before a new simulated approval.
-
-The comparison experience now combines five reference patterns without copying
-third-party code: a PCPartPicker-style persistent requirement status, a B&H-style
-side-by-side table, Sweetwater-style technical education, Wirecutter-style
-recommendation/trade-off explanations, and explicit evidence provenance. These
-are presentation patterns only; the browser does not create compatibility or
-approval decisions.
-
-## Frontend structure
-
-- `app.js` coordinates navigation and browser events.
-- `modules/state.js` owns UI-only state and invalidation.
-- `modules/fixtures.js` contains the clearly synthetic offline response.
-- `modules/api-client.js` normalizes authoritative backend responses without
-  filling missing costs or evidence.
-- `modules/render-comparison.js` renders status, alternatives, reasoning, and
-  evidence.
-- `modules/render-graph.js` renders the interactive and readable graph views.
-- `modules/render-candidates.js` provides isolated synthetic candidate browsing;
-  a shortlist never becomes a compatibility decision.
-- `modules/utils.js` contains formatting and safe HTML helpers.
+This directory contains the single BundleGraph frontend: a React 19, TypeScript,
+and Vite application. The earlier dependency-free prototype has been retired so
+there is one entry point, one state model, one API adapter, and one build.
 
 ## Run locally
 
-From the repository root:
-
 ```powershell
-python -m http.server 5173 --directory frontend
+npm --prefix frontend ci
+npm --prefix frontend run dev
 ```
 
-Open `http://127.0.0.1:5173`. The default mode is fully offline and resettable.
+Open `http://127.0.0.1:5173`. With no environment configuration the application
+runs in visibly labeled synthetic fixture mode. Fixture approval, execution, and
+recovery records are demonstrations only; they do not call a provider.
 
-Run the frontend contract checks with:
+To connect the optional, non-authoritative demo API in `bundlegraph_api`, copy
+`frontend/.env.example` to `frontend/.env.local` and set:
+
+```dotenv
+VITE_BUNDLEGRAPH_DEMO_API_BASE=http://127.0.0.1:8000
+```
+
+Then start that API separately:
+
+```powershell
+python -m uvicorn bundlegraph_api.app:app --port 8000
+```
+
+If a configured API cannot be reached, the frontend reports an error. It does
+not silently display fixture success as if it came from the API.
+
+## Checks and production build
 
 ```powershell
 npm --prefix frontend run check
+npm --prefix frontend run build
+npm --prefix frontend run preview
 ```
 
-No npm packages are installed or required; `package.json` only declares the ES
-module mode and the Node test command.
+The production artifact is written to `frontend/dist/`. Deploy that directory
+behind the same origin as the authoritative API when the Member 2 confirmation,
+plan, evidence, and approval bridge is connected.
 
-See [INTEGRATION.md](INTEGRATION.md) for runtime modes, exact routes, blocked live
-capabilities, release checks, and the opt-in backend readiness smoke test.
+## Boundaries
 
-## Authoritative backend mode
+- The browser never decides compatibility, authoritative confirmation, payment
+  recipients, or payment outcomes.
+- Synthetic fixtures remain labeled and are not substituted after a configured
+  backend failure.
+- Unknown costs, evidence, and delivery feasibility remain unknown.
+- Browser variables beginning with `VITE_` are public configuration, never
+  credentials.
+- PayPal, provider, database, and authentication secrets remain server-side.
 
-In `BUNDLEGRAPH_MODE=application`, FastAPI serves this directory and the API from
-the same origin. The UI discovers that runtime automatically. Enter a
-deployment-issued access token; the browser holds it in memory only. If no
-confirmation reference is supplied, the browser saves the guided answers as a
-draft, displays server clarification failures, requests a separate confirmation,
-and then generates proposals from the server-held catalog snapshot.
-
-Append `?apiBase=http://127.0.0.1:8080` only when developing with a separate
-static server. The browser never supplies an approval actor, payment recipient,
-merchant mapping, or confirmation claim.
-
-## Integration status
-
-The comparison table and dependency graph are intentionally implemented with
-native browser APIs until the team verifies AG Grid/AG Studio access. The schedule
-is a transparent demo timeline, not a delivery-date promise; Bryntum integration
-is not claimed. The notification panel is simulated and does not call Zapier.
-
-Member 3 should extend `modules/api-client.js` only after final authoritative API
-contracts are deployed. Fixture behavior must remain separate in
-`modules/fixtures.js`.
-
-The backend now exposes authenticated candidate discovery and replacement
-generation. Candidate results remain draft-only. A generated replacement is
-reviewed before the separate apply call creates a new plan version and invalidates
-the old approval.
+See [INTEGRATION.md](INTEGRATION.md) for the API and release boundary.
