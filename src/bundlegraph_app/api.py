@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
 from bundlegraph.service import (
@@ -132,12 +133,15 @@ def build_app(
     planning_inputs: PlanningInputsRepository,
     webhook_verifier: PayPalWebhookVerifier | None = None,
     readiness: dict[str, bool] | None = None,
+    allowed_origins: tuple[str, ...] = (),
 ) -> FastAPI:
     """Return a FastAPI application wired to the given authoritative service.
 
     ``evidence_reader_adapter`` must satisfy ``bundlegraph.service.BundlePlanEvidenceReader``.
     """
     app = FastAPI(title="BundleGraph Member 2 API", version="0.1.0")
+    if allowed_origins:
+        app.add_middleware(CORSMiddleware, allow_origins=list(allowed_origins), allow_credentials=True, allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "X-Correlation-ID"])
     verifier = webhook_verifier or RejectingWebhookVerifier()
     readiness_checks = readiness or {"persistence": False, "authentication": False, "paypal": False, "webhook_verifier": False}
 
