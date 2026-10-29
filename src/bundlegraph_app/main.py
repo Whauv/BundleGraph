@@ -13,13 +13,11 @@ from .application import ApplicationService
 from .paypal import FakeSandboxClient, PayPalAdapter
 from .persistence import new_in_memory_repositories
 from .planning import PlanningInputsRepository
-from .config import RuntimeMode, production_settings, runtime_mode
+from .config import RuntimeMode, frontend_origins, production_settings, runtime_mode
 
 
-def _build() -> "FastAPI":  # noqa: F821 -- forward reference for lazy FastAPI import
-    if runtime_mode() is RuntimeMode.PRODUCTION:
-        production_settings()
-        raise RuntimeError("production startup blocked: PostgreSQL, authentication, PayPal Orders, and webhook verifier adapters are not configured")
+def build_demo_app() -> "FastAPI":  # noqa: F821 -- forward reference for lazy FastAPI import
+    """Compose only deterministic demo adapters; never use this for production."""
     plans, approvals, payments, webhooks, evidence_reader = new_in_memory_repositories()
     sandbox_recipients = frozenset(
         os.getenv("BUNDLEGRAPH_SANDBOX_RECIPIENTS", "merchant-reference-demo").split(",")
@@ -36,7 +34,17 @@ def _build() -> "FastAPI":  # noqa: F821 -- forward reference for lazy FastAPI i
     # A real deployment injects a durable confirmation/catalog repository during
     # startup.  The empty local repository deliberately fails closed until an
     # authoritative confirmation has been registered.
-    return build_app(service, evidence_reader, PlanningInputsRepository(), readiness={"persistence": False, "authentication": False, "paypal": False, "webhook_verifier": False})
+    return build_app(service, evidence_reader, PlanningInputsRepository(), readiness={"persistence": False, "authentication": False, "paypal": False, "webhook_verifier": False}, allowed_origins=frontend_origins())
+
+
+def build_production_app() -> "FastAPI":  # noqa: F821
+    """Validate configuration, then fail closed until all production adapters exist."""
+    production_settings()
+    raise RuntimeError("production startup blocked: PostgreSQL, authentication, PayPal Orders, and webhook verifier adapters are not configured")
+
+
+def _build() -> "FastAPI":  # noqa: F821
+    return build_production_app() if runtime_mode() is RuntimeMode.PRODUCTION else build_demo_app()
 
 
 app = _build()

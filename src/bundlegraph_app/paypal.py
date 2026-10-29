@@ -55,6 +55,8 @@ class PayPalSandboxClient(Protocol):
 
     def refund(self, *, request_id: str, capture_reference: str, amount: Money, operation_id: str) -> PayPalResult: ...
 
+    def get_result(self, *, request_id: str) -> PayPalResult | None: ...
+
 
 class PayPalWebhookVerifier(Protocol):
     """Server-side verifier; request JSON must never claim it is verified."""
@@ -118,6 +120,10 @@ class PayPalAdapter:
             operation_id=operation_id,
         )
 
+    def reconcile(self, *, operation_id: str, kind: PaymentOperationKind) -> PayPalResult | None:
+        """Read a prior idempotent request result; never creates a new payment."""
+        return self._client.get_result(request_id=self.idempotency_key(operation_id, kind))
+
 
 # ---------------------------------------------------------------------------
 # In-process fake sandbox client for tests and demo mode
@@ -155,6 +161,9 @@ class FakeSandboxClient(PayPalSandboxClient):
     def inject_next_failure(self, request_id: str, reason_code: str) -> None:
         """Force the next call with ``request_id`` to fail. Used in tests only."""
         self._failures[request_id] = reason_code
+
+    def get_result(self, *, request_id: str) -> PayPalResult | None:
+        return self._by_request_id.get(request_id)
 
     def _next_ref(self, prefix: str) -> str:
         value = f"{prefix}-{self._next_seq:06d}"
