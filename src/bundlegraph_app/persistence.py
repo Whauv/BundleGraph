@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from threading import RLock
+from typing import Protocol
 
 from bundlegraph.models import Evidence
 
@@ -31,7 +32,36 @@ class _Store:
         self._plan_evidence: dict[str, tuple[Evidence, ...]] = {}
 
 
-class PlanRepository:
+class PlanRepository(Protocol):
+    def save(self, plan: Plan) -> None: ...
+    def get(self, plan_id: str) -> Plan | None: ...
+
+
+class ApprovalRepository(Protocol):
+    def save(self, approval: Approval) -> None: ...
+    def get(self, approval_id: str) -> Approval | None: ...
+    def list_for_plan(self, plan_id: str) -> tuple[Approval, ...]: ...
+
+
+class PaymentRepository(Protocol):
+    def save(self, operation: PaymentOperation) -> None: ...
+    def create_if_absent(self, operation: PaymentOperation) -> tuple[PaymentOperation, bool]: ...
+    def get(self, operation_id: str) -> PaymentOperation | None: ...
+    def list_for_plan(self, plan_id: str) -> tuple[PaymentOperation, ...]: ...
+    def find_by_provider_reference(self, provider_reference: str) -> PaymentOperation | None: ...
+
+
+class WebhookEventRepository(Protocol):
+    def record_if_new(self, event: WebhookEvent) -> bool: ...
+    def get(self, event_id: str) -> WebhookEvent | None: ...
+
+
+class EvidenceReader(Protocol):
+    def put(self, plan_id: str, evidence: tuple[Evidence, ...]) -> None: ...
+    def get_evidence_for_plan(self, plan_id: str) -> tuple[Evidence, ...] | None: ...
+
+
+class InMemoryPlanRepository:
     def __init__(self, store: _Store) -> None:
         self._store = store
 
@@ -45,7 +75,7 @@ class PlanRepository:
             return deepcopy(plan) if plan is not None else None
 
 
-class ApprovalRepository:
+class InMemoryApprovalRepository:
     def __init__(self, store: _Store) -> None:
         self._store = store
 
@@ -63,7 +93,7 @@ class ApprovalRepository:
             return tuple(deepcopy(a) for a in self._store._approvals.values() if a.plan_id == plan_id)
 
 
-class PaymentRepository:
+class InMemoryPaymentRepository:
     def __init__(self, store: _Store) -> None:
         self._store = store
 
@@ -97,7 +127,7 @@ class PaymentRepository:
             return None
 
 
-class WebhookEventRepository:
+class InMemoryWebhookEventRepository:
     def __init__(self, store: _Store) -> None:
         self._store = store
 
@@ -114,7 +144,7 @@ class WebhookEventRepository:
             return self._store._webhook_events.get(event_id)
 
 
-class EvidenceReader:
+class InMemoryEvidenceReader:
     """Implements ``bundlegraph.service.BundlePlanEvidenceReader`` against the store."""
 
     def __init__(self, store: _Store) -> None:
@@ -136,9 +166,9 @@ def new_in_memory_repositories() -> tuple[PlanRepository, ApprovalRepository, Pa
     """Convenience constructor; one shared store backs all five repositories."""
     store = _Store()
     return (
-        PlanRepository(store),
-        ApprovalRepository(store),
-        PaymentRepository(store),
-        WebhookEventRepository(store),
-        EvidenceReader(store),
+        InMemoryPlanRepository(store),
+        InMemoryApprovalRepository(store),
+        InMemoryPaymentRepository(store),
+        InMemoryWebhookEventRepository(store),
+        InMemoryEvidenceReader(store),
     )

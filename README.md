@@ -6,7 +6,7 @@ This package deliberately contains no payment, authentication, persistence, fron
 
 ## Contract principles
 
-- Prices, shipping, and tax use integer minor units. Shipping and tax may be explicitly unknown; unknown never means zero.
+- Prices, shipping, and tax use integer minor units. Shipping and tax are totals for one merchant checkout line (not per-unit charges), may be explicitly unknown, and unknown never means zero.
 - A normalized product variant holds only evidence-linked specifications. A merchant offer holds price and availability for that variant.
 - Fixture evidence is usable only for labeled offline demonstrations; missing, stale, or conflicting evidence remains explicit.
 - The fixture catalog contains 24 entirely synthetic products and 15 synthetic offers, including intentionally difficult selection scenarios.
@@ -101,7 +101,7 @@ The interactive [Member 1 intelligence-boundary diagram](docs/architecture/membe
 
 ## Member 2 application layer
 
-`bundlegraph_app` is the authoritative application layer: durable plan IDs and versions, approval binding by plan-version fingerprint, idempotent PayPal sandbox adapter (authorize/capture/void/refund), webhook deduplication, and a FastAPI boundary wiring Member 1's handlers. It is strictly outside the `bundlegraph` intelligence package and lives in `src/bundlegraph_app/`.
+`bundlegraph_app` is the authoritative application layer: durable plan IDs and versions, approval binding by plan-version fingerprint, persisted merchant allocations, idempotent PayPal sandbox adapter (authorize/capture/void/refund), reconciliation of submitted operations, webhook deduplication, and a FastAPI boundary wiring Member 1's handlers. It is strictly outside the `bundlegraph` intelligence package and lives in `src/bundlegraph_app/`.
 
 ```powershell
 python -m pip install -e ".[app]"

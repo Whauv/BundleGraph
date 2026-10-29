@@ -21,6 +21,24 @@ are naturally safe.
 The fake client is intended for tests and the local demo. Do not reuse it in a
 hosted environment.
 
+## Recovery boundary
+
+The protocol includes `get_result(request_id)`. `PayPalAdapter.reconcile()` uses
+that read-only operation to recover a persisted `SUBMITTED` or `UNCERTAIN`
+operation after a worker or process interruption. Reconciliation is deliberately
+separate from a money-moving retry: it cannot create a new authorization, capture,
+void, or refund. The live adapter must map this boundary to a documented PayPal
+read/reconciliation path before production mode can be enabled.
+
+## Merchant allocations
+
+Plan versions persist one allocation per merchant. Each allocation contains a
+server-derived recipient, amount, and offer IDs. The authorization API accepts an
+allocation ID only; the caller cannot alter the merchant or amount. For
+multi-merchant plans, every shipping and tax value must be known per checkout line;
+bounded allowances are intentionally rejected because they cannot be allocated
+between merchants safely.
+
 ## Live sandbox client (to-do, Nov 2–5)
 
 The current application deliberately does not enable a live client. PayPal's

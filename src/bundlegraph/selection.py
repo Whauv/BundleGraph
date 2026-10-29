@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 from enum import StrEnum
 from itertools import combinations_with_replacement, product
 
@@ -13,10 +14,13 @@ from .models import (
     AvailabilityStatus,
     ConfirmedRequirements,
     ConflictStatus,
+    Evidence,
     FixtureCatalog,
     FreshnessStatus,
     MerchantOffer,
     Money,
+    Product,
+    ProductCategory,
     SupportStatus,
     UnknownCost,
 )
@@ -140,8 +144,29 @@ class BundleSelectionResult(BaseModel):
     infeasibility: Infeasibility | None = None
 
 
-def _availability_supported(offer: MerchantOffer, catalog: FixtureCatalog) -> bool:
-    evidence = next((record for record in catalog.evidence if record.evidence_id == offer.availability_evidence_id), None)
+@dataclass(frozen=True, slots=True)
+class _CatalogIndex:
+    """Per-search lookup tables; kept internal so the normalized catalog contract stays stable."""
+
+    products_by_id: dict[str, Product]
+    evidence_by_id: dict[str, Evidence]
+    offers_by_category: dict[ProductCategory, tuple[MerchantOffer, ...]]
+
+
+def _catalog_index(catalog: FixtureCatalog) -> _CatalogIndex:
+    products_by_id = {item.product_id: item for item in catalog.products}
+    grouped: dict[ProductCategory, list[MerchantOffer]] = {}
+    for offer in catalog.offers:
+        grouped.setdefault(products_by_id[offer.product_id].category, []).append(offer)
+    return _CatalogIndex(
+        products_by_id=products_by_id,
+        evidence_by_id={record.evidence_id: record for record in catalog.evidence},
+        offers_by_category={category: tuple(sorted(offers, key=lambda offer: offer.offer_id)) for category, offers in grouped.items()},
+    )
+
+
+def _availability_supported(offer: MerchantOffer, evidence_by_id: dict[str, Evidence]) -> bool:
+    evidence = evidence_by_id.get(offer.availability_evidence_id)
     return bool(
         evidence
         and offer.availability_status is AvailabilityStatus.AVAILABLE
@@ -152,12 +177,17 @@ def _availability_supported(offer: MerchantOffer, catalog: FixtureCatalog) -> bo
     )
 
 
-def _candidate_groups(request: BundleSelectionRequest) -> tuple[list[tuple[MerchantOffer, ...]], set[str]]:
-    products = {item.product_id: item for item in request.catalog.products}
+def _candidate_groups(request: BundleSelectionRequest, index: _CatalogIndex) -> tuple[list[tuple[MerchantOffer, ...]], set[str]]:
     groups: list[tuple[MerchantOffer, ...]] = []
     reasons: set[str] = set()
     for requirement in sorted(request.requirements.required_quantities, key=lambda item: item.category.value):
-        eligible = tuple(sorted((offer for offer in request.catalog.offers if offer.product_id not in request.excluded_product_ids and offer.offer_id not in request.excluded_offer_ids and products[offer.product_id].category is requirement.category and _availability_supported(offer, request.catalog)), key=lambda offer: offer.offer_id))
+        eligible = tuple(
+            offer
+            for offer in index.offers_by_category.get(requirement.category, ())
+            if offer.product_id not in request.excluded_product_ids
+            and offer.offer_id not in request.excluded_offer_ids
+            and _availability_supported(offer, index.evidence_by_id)
+        )
         if not eligible:
             reasons.add(f"NO_SUPPORTED_AVAILABLE_{requirement.category.value.upper()}_OFFER")
             continue
@@ -231,7 +261,7 @@ def _proposal(request: BundleSelectionRequest, selected_offers: tuple[MerchantOf
 
 def select_bundles(request: BundleSelectionRequest) -> BundleSelectionResult:
     """Exact enumeration within `max_evaluations`; a limit is never reported as infeasibility."""
-    groups, reasons = _candidate_groups(request)
+    groups, reasons = _candidate_groups(request, _catalog_index(request.catalog))
     if reasons:
         return BundleSelectionResult(proposals=(), search_status=SearchStatus.COMPLETED, evaluated_candidates=0, infeasibility=Infeasibility(reason_codes=tuple(sorted(reasons)), explanation="At least one required category has no supported, available, fresh candidate offer."))
     proposals: list[BundleProposal] = []

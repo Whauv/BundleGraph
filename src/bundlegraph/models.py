@@ -167,7 +167,13 @@ class Product(BaseModel):
 
 
 class MerchantOffer(BaseModel):
-    """A merchant observation for one exact product variant."""
+    """A merchant observation for one exact product variant.
+
+    ``shipping`` and ``tax`` are totals for one checkout line (not per-unit
+    values). A line with quantity greater than one therefore applies each value
+    once. Providers that only expose per-unit charges must normalize them into
+    the line total before constructing this model.
+    """
 
     model_config = ConfigDict(frozen=True)
     offer_id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
