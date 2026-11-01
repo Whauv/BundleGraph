@@ -53,6 +53,9 @@ export const RequestBuilder: React.FC = () => {
 
         <div className="screen-header-meta">
           <span className="badge badge-neutral">
+            <span>Extraction: Schema Adapter</span>
+          </span>
+          <span className="badge badge-neutral">
             <Cpu size={12} />
             <span>gemini-1.5-pro</span>
           </span>

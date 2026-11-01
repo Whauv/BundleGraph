@@ -15,48 +15,75 @@ import {
   SAMPLE_REPLAN_RESULT,
 } from '../fixtures/offlineData';
 
-const BASE_URL = 'http://localhost:8000';
+const configuredDemoBase = import.meta.env.VITE_BUNDLEGRAPH_DEMO_API_BASE?.trim();
+const DEMO_API_BASE = configuredDemoBase
+  ? configuredDemoBase.replace(/\/$/, '')
+  : null;
 
-async function safeFetch<T>(endpoint: string, options?: RequestInit, fallback?: T): Promise<T> {
+export type FrontendRuntimeMode = 'fixture' | 'demo_api';
+
+export const frontendRuntime: {
+  mode: FrontendRuntimeMode;
+  label: string;
+  apiBase: string | null;
+} = DEMO_API_BASE
+  ? {
+      mode: 'demo_api',
+      label: 'Connected demo API',
+      apiBase: DEMO_API_BASE,
+    }
+  : {
+      mode: 'fixture',
+      label: 'Synthetic offline fixtures',
+      apiBase: null,
+    };
+
+function cloneFixture<T>(value: T): T {
+  return structuredClone(value);
+}
+
+async function requestDemoApi<T>(endpoint: string, options: RequestInit, fixture: T): Promise<T> {
+  if (!DEMO_API_BASE) return cloneFixture(fixture);
+
+  let response: Response;
   try {
-    const res = await fetch(`${BASE_URL}${endpoint}`, {
+    response = await fetch(`${DEMO_API_BASE}${endpoint}`, {
       headers: { 'Content-Type': 'application/json' },
       ...options,
     });
-    if (!res.ok) {
-      if (fallback !== undefined) return fallback;
-      throw new Error(`API error ${res.status}: ${await res.text()}`);
-    }
-    return await res.json();
-  } catch (err) {
-    if (fallback !== undefined) {
-      console.warn(`[BundleGraph API] Offline mode active for ${endpoint}:`, err);
-      return fallback;
-    }
-    throw err;
+  } catch (error) {
+    throw new Error(
+      `Configured demo API is unavailable for ${endpoint}. Fixture data was not substituted. ${String(error)}`,
+    );
   }
+
+  if (!response.ok) {
+    throw new Error(`Demo API ${endpoint} returned ${response.status}: ${await response.text()}`);
+  }
+  return response.json() as Promise<T>;
 }
 
 export const api = {
   async getPresets(): Promise<PresetScenario[]> {
-    return safeFetch<PresetScenario[]>('/api/presets', { method: 'GET' }, OFFLINE_PRESETS);
+    return requestDemoApi('/api/presets', { method: 'GET' }, OFFLINE_PRESETS);
   },
 
   async interpretRequirements(message: string, requestReference?: string): Promise<RequirementInterpretation> {
-    const fallback: RequirementInterpretation = {
-      ...SAMPLE_INTERPRETATION,
+    const fixture: RequirementInterpretation = {
+      ...cloneFixture(SAMPLE_INTERPRETATION),
       draft: {
-        ...SAMPLE_INTERPRETATION.draft,
-        use_case: message.slice(0, 50),
+        ...cloneFixture(SAMPLE_INTERPRETATION.draft),
+        use_case: message.slice(0, 80),
       },
+      provider_mode: 'synthetic_fixture',
     };
-    return safeFetch<RequirementInterpretation>(
+    return requestDemoApi(
       '/api/requirements/interpret',
       {
         method: 'POST',
         body: JSON.stringify({ message, request_reference: requestReference }),
       },
-      fallback,
+      fixture,
     );
   },
 
@@ -69,22 +96,19 @@ export const api = {
     listening_requirement: string;
     deadline?: string;
   }): Promise<ConfirmedRequirements> {
-    const fallback: ConfirmedRequirements = {
-      ...SAMPLE_CONFIRMED_REQ,
+    const fixture: ConfirmedRequirements = {
+      ...cloneFixture(SAMPLE_CONFIRMED_REQ),
       use_case: params.use_case,
       participants: params.participants,
       budget: { amount_minor: params.budget_minor, currency: params.currency },
       laptop_connectors: [{ connector: params.laptop_connector }],
       listening_requirement: params.listening_requirement,
-      deadline: params.deadline || SAMPLE_CONFIRMED_REQ.deadline,
+      deadline: params.deadline || null,
     };
-    return safeFetch<ConfirmedRequirements>(
+    return requestDemoApi(
       '/api/requirements/confirm',
-      {
-        method: 'POST',
-        body: JSON.stringify(params),
-      },
-      fallback,
+      { method: 'POST', body: JSON.stringify(params) },
+      fixture,
     );
   },
 
@@ -97,18 +121,19 @@ export const api = {
       infeasibility?: { reason_codes: string[] };
     };
   }> {
-    const fallback = {
+    const fixture = {
       status: 'ok',
-      reason_codes: [],
+      reason_codes: [] as string[],
       result: {
-        proposals: [SAMPLE_PROPOSAL],
-        search_status: 'completed',
+        proposals: [cloneFixture(SAMPLE_PROPOSAL)],
+        search_status: 'fixture_completed',
       },
     };
-    return safeFetch('/api/bundle-plans/generate', {
-      method: 'POST',
-      body: JSON.stringify({ requirements }),
-    }, fallback);
+    return requestDemoApi(
+      '/api/bundle-plans/generate',
+      { method: 'POST', body: JSON.stringify({ requirements }) },
+      fixture,
+    );
   },
 
   async replanBundle(params: {
@@ -119,12 +144,9 @@ export const api = {
     plan_id: string;
     plan_version: string;
   }): Promise<ReplanResult> {
-    return safeFetch<ReplanResult>(
+    return requestDemoApi(
       '/api/bundle-plans/replan',
-      {
-        method: 'POST',
-        body: JSON.stringify(params),
-      },
+      { method: 'POST', body: JSON.stringify(params) },
       SAMPLE_REPLAN_RESULT,
     );
   },
@@ -135,23 +157,20 @@ export const api = {
     amount_minor: number;
     currency: string;
   }): Promise<ApprovalRecord> {
-    const fallback: ApprovalRecord = {
-      approval_id: `appr-${Math.random().toString(36).substring(2, 9)}`,
+    const fixture: ApprovalRecord = {
+      approval_id: 'fixture-approval-v1',
       plan_id: params.plan_id,
       plan_version: params.plan_version,
       amount_minor: params.amount_minor,
       currency: params.currency,
-      status: 'APPROVED',
-      created_at: new Date().toISOString(),
+      status: 'SIMULATED_FIXTURE_APPROVAL',
+      created_at: '2026-01-01T00:00:00Z',
       valid: true,
     };
-    return safeFetch<ApprovalRecord>(
+    return requestDemoApi(
       '/api/approvals/create',
-      {
-        method: 'POST',
-        body: JSON.stringify(params),
-      },
-      fallback,
+      { method: 'POST', body: JSON.stringify(params) },
+      fixture,
     );
   },
 
@@ -163,58 +182,35 @@ export const api = {
     currency: string;
     inject_failure_offer_id?: string;
   }): Promise<ExecutionRecord> {
-    if (params.inject_failure_offer_id) {
-      const failFallback: ExecutionRecord = {
-        execution_status: 'FAILED_MERCHANT_STOCK_OUTAGE',
-        plan_id: params.plan_id,
-        approval_id: params.approval_id,
-        approval_invalidated: true,
-        failed_offer_id: params.inject_failure_offer_id,
-        message: `Merchant reported stock outage for offer '${params.inject_failure_offer_id}'. Transaction halted.`,
-        replan_recommended: true,
-      };
-      return safeFetch<ExecutionRecord>(
-        '/api/executions/simulate',
-        {
-          method: 'POST',
-          body: JSON.stringify(params),
-        },
-        failFallback,
-      );
-    }
-
-    const successFallback: ExecutionRecord = {
-      execution_status: 'COMPLETED',
-      transaction_id: `PAYPAL-TXN-${Math.random().toString(36).substring(2, 12).toUpperCase()}`,
-      plan_id: params.plan_id,
-      amount_minor: params.amount_minor,
-      currency: params.currency,
-      settled_at: new Date().toISOString(),
-      approval_id: params.approval_id,
-      message: 'PayPal Sandbox payment captured and reconciled successfully.',
-    };
-    return safeFetch<ExecutionRecord>(
+    const fixture: ExecutionRecord = params.inject_failure_offer_id
+      ? {
+          execution_status: 'FAILED_MERCHANT_STOCK_OUTAGE',
+          plan_id: params.plan_id,
+          approval_id: params.approval_id,
+          approval_invalidated: true,
+          failed_offer_id: params.inject_failure_offer_id,
+          message: `Synthetic stock outage for ${params.inject_failure_offer_id}. No transaction was attempted.`,
+          replan_recommended: true,
+        }
+      : {
+          execution_status: 'COMPLETED',
+          transaction_id: 'fixture-transaction-v1',
+          plan_id: params.plan_id,
+          amount_minor: params.amount_minor,
+          currency: params.currency,
+          settled_at: '2026-01-01T00:00:00Z',
+          approval_id: params.approval_id,
+          message: 'Synthetic fixture execution completed. No payment provider was called.',
+        };
+    return requestDemoApi(
       '/api/executions/simulate',
-      {
-        method: 'POST',
-        body: JSON.stringify(params),
-      },
-      successFallback,
-    );
-  },
-
-  async sendZapierNotification(event_type: string, payload: Record<string, unknown>): Promise<{ status: string }> {
-    return safeFetch(
-      '/api/notifications/zapier',
-      {
-        method: 'POST',
-        body: JSON.stringify({ event_type, payload }),
-      },
-      { status: 'simulated_local' },
+      { method: 'POST', body: JSON.stringify(params) },
+      fixture,
     );
   },
 
   async resetDemo(): Promise<void> {
-    await safeFetch('/api/demo/reset', { method: 'POST' }, { status: 'reset_completed' });
+    if (!DEMO_API_BASE) return;
+    await requestDemoApi('/api/demo/reset', { method: 'POST' }, { status: 'fixture_reset' });
   },
 };

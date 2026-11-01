@@ -3,7 +3,7 @@ import { useDemo } from '../../store/demoStore';
 import { Layers, RotateCcw, SlidersHorizontal, User, ShieldCheck } from 'lucide-react';
 
 export const Header: React.FC = () => {
-  const { presets, activePresetId, loadPreset, resetAll, isLoading } = useDemo();
+  const { presets, activePresetId, loadPreset, resetAll, isLoading, runtimeMode } = useDemo();
 
   return (
     <header className="main-header">
@@ -97,9 +97,17 @@ export const Header: React.FC = () => {
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-          <ShieldCheck size={14} style={{ color: 'var(--status-emerald)' }} />
-          <span>Solver: <strong style={{ color: 'var(--status-emerald)' }}>DETERMINISTIC_PASS</strong></span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+          <span>
+            Runtime:{' '}
+            <strong style={{ color: runtimeMode === 'fixture' ? 'var(--status-amber)' : 'var(--status-emerald)' }}>
+              {runtimeMode === 'fixture' ? 'FIXTURE_ONLY' : 'DEMO_API_CONNECTED'}
+            </strong>
+          </span>
+          <span style={{ borderLeft: '1px solid var(--border-default)', paddingLeft: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <ShieldCheck size={14} style={{ color: 'var(--status-emerald)' }} />
+            <span>Solver: <strong style={{ color: 'var(--status-emerald)' }}>DETERMINISTIC_PASS</strong></span>
+          </span>
         </div>
       </div>
     </header>

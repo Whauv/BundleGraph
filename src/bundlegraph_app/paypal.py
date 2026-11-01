@@ -55,6 +55,8 @@ class PayPalSandboxClient(Protocol):
 
     def refund(self, *, request_id: str, capture_reference: str, amount: Money, operation_id: str) -> PayPalResult: ...
 
+    def get_result(self, *, request_id: str) -> PayPalResult | None: ...
+
 
 class PayPalWebhookVerifier(Protocol):
     """Server-side verifier; request JSON must never claim it is verified."""
@@ -69,11 +71,24 @@ class RejectingWebhookVerifier:
         return False
 
 
+class DisabledPayPalClient:
+    """Fail-closed transport for a planning-only deployment."""
+    @staticmethod
+    def _disabled() -> PayPalResult:
+        return PayPalResult(status=PayPalResultStatus.FAILED, provider_reference=None, reason_code="PAYMENT_PROVIDER_NOT_CONFIGURED", settled_at=None)
+
+    def authorize(self, **_: Any) -> PayPalResult: return self._disabled()
+    def capture(self, **_: Any) -> PayPalResult: return self._disabled()
+    def void(self, **_: Any) -> PayPalResult: return self._disabled()
+    def refund(self, **_: Any) -> PayPalResult: return self._disabled()
+    def get_result(self, *, request_id: str) -> PayPalResult | None: return None
+
+
 class PayPalAdapter:
     """Thin wrapper that enforces the sandbox allowlist and idempotency key format."""
 
     def __init__(self, client: PayPalSandboxClient, sandbox_recipients: frozenset[str]):
-        if not sandbox_recipients:
+        if not sandbox_recipients and not isinstance(client, DisabledPayPalClient):
             raise PayPalSandboxError("the sandbox recipient allowlist must not be empty")
         self._client = client
         self._allowed = frozenset(sandbox_recipients)
@@ -118,6 +133,10 @@ class PayPalAdapter:
             operation_id=operation_id,
         )
 
+    def reconcile(self, *, operation_id: str, kind: PaymentOperationKind) -> PayPalResult | None:
+        """Read a prior idempotent request result; never creates a new payment."""
+        return self._client.get_result(request_id=self.idempotency_key(operation_id, kind))
+
 
 # ---------------------------------------------------------------------------
 # In-process fake sandbox client for tests and demo mode
@@ -155,6 +174,9 @@ class FakeSandboxClient(PayPalSandboxClient):
     def inject_next_failure(self, request_id: str, reason_code: str) -> None:
         """Force the next call with ``request_id`` to fail. Used in tests only."""
         self._failures[request_id] = reason_code
+
+    def get_result(self, *, request_id: str) -> PayPalResult | None:
+        return self._by_request_id.get(request_id)
 
     def _next_ref(self, prefix: str) -> str:
         value = f"{prefix}-{self._next_seq:06d}"

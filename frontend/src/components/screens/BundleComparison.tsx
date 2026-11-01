@@ -1,7 +1,5 @@
-import React, { useState } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
 import { useDemo } from '../../store/demoStore';
-import { BundleGrid } from '../grid/BundleGrid';
-import { EvidenceGraph } from '../graph/EvidenceGraph';
 import { ScheduleTimeline } from '../timeline/ScheduleTimeline';
 import { 
   Table, 
@@ -13,10 +11,12 @@ import {
   CheckCircle2, 
   ShieldCheck, 
   Lock,
-  Layers,
   GitCompare,
   RotateCcw
 } from 'lucide-react';
+
+const BundleGrid = lazy(() => import('../grid/BundleGrid').then((module) => ({ default: module.BundleGrid })));
+const EvidenceGraph = lazy(() => import('../graph/EvidenceGraph').then((module) => ({ default: module.EvidenceGraph })));
 
 export const BundleComparison: React.FC = () => {
   const {
@@ -246,11 +246,13 @@ export const BundleComparison: React.FC = () => {
             </div>
           </div>
 
-          {/* Active Tab View */}
+          {/* Active Tab View with Suspense */}
           <div style={{ minHeight: '380px' }}>
-            {activeTab === 'grid' && <BundleGrid proposal={selectedProposal} />}
-            {activeTab === 'graph' && <EvidenceGraph report={selectedProposal?.compatibility_report} />}
-            {activeTab === 'timeline' && <ScheduleTimeline deadlineDays={7} isDelayed={false} />}
+            <Suspense fallback={<div className="surface-panel" role="status" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading view…</div>}>
+              {activeTab === 'grid' && <BundleGrid proposal={selectedProposal} />}
+              {activeTab === 'graph' && <EvidenceGraph report={selectedProposal?.compatibility_report} />}
+              {activeTab === 'timeline' && <ScheduleTimeline deadlineDays={7} isDelayed={false} />}
+            </Suspense>
           </div>
         </div>
 
@@ -265,10 +267,6 @@ export const BundleComparison: React.FC = () => {
               <ArrowLeft size={16} />
               <span>Back to Constraints</span>
             </button>
-            <div className="badge badge-neutral" style={{ display: 'none' }}>
-              <Layers size={13} style={{ color: 'var(--status-emerald)' }} />
-              <span>{selectedProposal?.proposal_key || 'bundle-opt-alpha-complete'}</span>
-            </div>
           </div>
 
           <button

@@ -9,10 +9,12 @@ import type {
   RequirementInterpretation,
   ScreenStep,
 } from '../types/bundlegraph';
-import { api } from '../api/client';
+import { api, frontendRuntime, type FrontendRuntimeMode } from '../api/client';
 import { OFFLINE_PRESETS, SAMPLE_CONFIRMED_REQ, SAMPLE_PROPOSAL } from '../fixtures/offlineData';
 
 interface DemoContextType {
+  runtimeMode: FrontendRuntimeMode;
+  runtimeLabel: string;
   currentStep: ScreenStep;
   setStep: (step: ScreenStep) => void;
   promptText: string;
@@ -281,6 +283,8 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   return (
     <DemoContext.Provider
       value={{
+        runtimeMode: frontendRuntime.mode,
+        runtimeLabel: frontendRuntime.label,
         currentStep,
         setStep,
         promptText,
@@ -322,6 +326,7 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   );
 };
 
+// oxlint-disable-next-line react/only-export-components -- provider and hook form one state boundary.
 export const useDemo = () => {
   const context = useContext(DemoContext);
   if (!context) throw new Error('useDemo must be used within a DemoProvider');

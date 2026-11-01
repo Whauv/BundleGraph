@@ -80,6 +80,14 @@ class RecoveryCostSummary(BaseModel):
     unknown_offer_ids: tuple[str, ...] = ()
 
 
+class MoneyDelta(BaseModel):
+    """Signed minor-unit difference; unlike a price, it may be negative."""
+
+    model_config = ConfigDict(frozen=True)
+    amount_minor: int
+    currency: str = Field(min_length=3, max_length=3)
+
+
 class ReplacementBundleProposal(BaseModel):
     model_config = ConfigDict(frozen=True)
     replacement: BundleProposal
@@ -88,7 +96,7 @@ class ReplacementBundleProposal(BaseModel):
     retained_items: tuple[ItemDelta, ...]
     quantity_changed_items: tuple[ItemDelta, ...]
     affected_dependency_subgraph: DependencySubgraph
-    cost_difference: Money | None
+    cost_difference: MoneyDelta | None
     cost_difference_assumptions: tuple[str, ...]
     recovery_cost: RecoveryCostSummary
     compatibility_evidence_references: tuple[str, ...]
@@ -132,13 +140,13 @@ def _deltas(original: BundleProposal, replacement: BundleProposal) -> tuple[tupl
     return tuple(added), tuple(removed), tuple(retained), tuple(changed)
 
 
-def _cost_difference(original: BundleProposal, replacement: BundleProposal) -> tuple[Money | None, tuple[str, ...]]:
+def _cost_difference(original: BundleProposal, replacement: BundleProposal) -> tuple[MoneyDelta | None, tuple[str, ...]]:
     before, after = original.cost_breakdown.all_in_total, replacement.cost_breakdown.all_in_total
     if before is None or after is None:
         return None, ("Cost difference is unknown because an all-in total is unavailable.",)
     if before.currency != after.currency:
         return None, ("Cost difference is unknown because currencies differ.",)
-    return Money(amount_minor=after.amount_minor - before.amount_minor, currency=after.currency), ()
+    return MoneyDelta(amount_minor=after.amount_minor - before.amount_minor, currency=after.currency), ()
 
 
 def _recovery(facts: tuple[ExecutionFact, ...], currency: str | None) -> RecoveryCostSummary:

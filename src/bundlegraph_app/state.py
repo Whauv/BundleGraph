@@ -68,6 +68,22 @@ class Money(BaseModel):
         return normalized
 
 
+class MerchantAllocation(BaseModel):
+    """A stored, payment-ready portion of a plan version for one merchant.
+
+    The allocation is created from authoritative plan line items and their
+    documented shipping/tax values. HTTP clients select this identifier only;
+    they never supply a recipient or amount.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    allocation_id: str = Field(min_length=1)
+    merchant_reference: str = Field(min_length=1)
+    amount: Money
+    offer_ids: tuple[str, ...] = Field(min_length=1)
+
+
 class PlanVersion(BaseModel):
     """An immutable snapshot of what the user is being asked to approve."""
 
@@ -81,7 +97,7 @@ class PlanVersion(BaseModel):
     correlation_id: str = Field(min_length=1)
     line_items: tuple["PlanLineItem", ...] = Field(min_length=1)
     total: Money
-    payment_recipient_reference: str = Field(min_length=1)
+    merchant_allocations: tuple[MerchantAllocation, ...] = Field(min_length=1)
     payload: dict[str, Any]
 
     @field_validator("created_at")
@@ -161,6 +177,7 @@ class PaymentOperation(BaseModel):
     idempotency_key: str = Field(min_length=1)
     recipient_reference: str = Field(min_length=1)
     amount: Money
+    merchant_allocation_id: str = Field(min_length=1)
     parent_operation_id: str | None = None
     provider_reference: str | None = None
     submitted_at: datetime | None = None
