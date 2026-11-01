@@ -29,23 +29,23 @@ export const App: React.FC = () => {
         <Header />
         <StepNav />
         <MainView />
-        <footer style={{ backgroundColor: '#000000', borderTop: '1px solid #222222', padding: '0.625rem 1.25rem', fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', color: '#666666' }}>
-          <div style={{ maxWidth: '1440px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#00e575' }} />
-                <span>Engine: <strong style={{ color: '#ffffff' }}>v1.0.4-rc2</strong></span>
+        <footer style={{ backgroundColor: 'var(--bg-header)', borderTop: '1px solid var(--border-default)', padding: '0.875rem 1.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+          <div style={{ maxWidth: '1400px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', flexWrap: 'wrap' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--status-emerald)', display: 'inline-block' }} />
+                <span>Engine: <strong style={{ color: 'var(--text-primary)' }}>v1.0.4-rc2</strong></span>
               </span>
-              <span style={{ borderLeft: '1px solid #222222', paddingLeft: '1rem' }}>
-                Deterministic Offline: <strong style={{ color: '#00e575' }}>ENABLED</strong>
+              <span style={{ borderLeft: '1px solid var(--border-default)', paddingLeft: '1.25rem' }}>
+                Deterministic Offline: <strong style={{ color: '#10b981' }}>ENABLED</strong>
               </span>
-              <span style={{ borderLeft: '1px solid #222222', paddingLeft: '1rem' }}>
-                Solver Latency: <strong style={{ color: '#ffffff' }}>0.42ms</strong>
+              <span style={{ borderLeft: '1px solid var(--border-default)', paddingLeft: '1.25rem' }}>
+                Solver Latency: <strong style={{ color: 'var(--text-primary)' }}>0.42ms</strong>
               </span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-              <span style={{ color: '#888888' }}>Integrated: AG Grid • Bryntum • PayPal SDK v2</span>
-              <span style={{ padding: '0.1rem 0.4rem', borderRadius: '2px', backgroundColor: '#111111', border: '1px solid #222222', fontSize: '0.625rem', color: '#ffffff', fontWeight: 600 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', flexWrap: 'wrap' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>Integrated: AG Grid • Bryntum • PayPal SDK v2</span>
+              <span className="badge badge-neutral">
                 PROD-SIM
               </span>
             </div>

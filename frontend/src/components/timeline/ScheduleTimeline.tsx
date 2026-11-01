@@ -17,18 +17,18 @@ export const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({ deadlineDays
   ];
 
   return (
-    <section className="studio-card" style={{ padding: '0.875rem' }}>
+    <section className="studio-card" style={{ padding: '1rem' }}>
       {/* Card Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <div style={{ width: '28px', height: '28px', borderRadius: '2px', background: '#111111', border: '1px solid #282828', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Calendar size={15} style={{ color: '#ffffff' }} />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.875rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
+          <div style={{ width: '28px', height: '28px', borderRadius: 'var(--radius-xs)', background: 'var(--bg-card-hover)', border: '1px solid var(--border-default)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Calendar size={14} style={{ color: 'var(--text-primary)' }} />
           </div>
           <div>
-            <h2 style={{ fontSize: '0.875rem', fontWeight: 600, color: '#ffffff', letterSpacing: '-0.01em', margin: 0 }}>
+            <h2 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '-0.01em', margin: 0 }}>
               Bryntum Delivery &amp; Milestones Timeline
             </h2>
-            <p style={{ fontSize: '0.75rem', color: '#888888', margin: '0.1rem 0 0 0' }}>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0.1rem 0 0 0' }}>
               Maps fulfillment lead-times, transit windows, studio testing buffer, and hard deadlines.
             </p>
           </div>
@@ -49,34 +49,34 @@ export const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({ deadlineDays
       </div>
 
       {/* Horizontal 6-Stage Sequence Tracker */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.5rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.625rem' }}>
         {steps.map((st, i) => {
           const IconComp = st.icon;
           const isDone = st.status === 'done';
           const isWarn = st.status === 'warn';
           const isDeadline = st.status === 'deadline';
 
-          let kickerColor = '#888888';
-          let progressBarBg = '#222222';
+          let kickerColor = 'var(--text-muted)';
+          let progressBarBg = 'var(--border-default)';
           if (isDone) {
-            kickerColor = '#00e575';
-            progressBarBg = '#00e575';
+            kickerColor = 'var(--status-emerald)';
+            progressBarBg = 'var(--status-emerald)';
           } else if (isWarn) {
-            kickerColor = '#fabc45';
-            progressBarBg = '#fabc45';
+            kickerColor = 'var(--status-amber)';
+            progressBarBg = 'var(--status-amber)';
           } else if (isDeadline) {
-            kickerColor = '#ffffff';
-            progressBarBg = '#ffffff';
+            kickerColor = 'var(--text-primary)';
+            progressBarBg = '#f0f6fc';
           }
 
           return (
             <div
               key={i}
               style={{
-                backgroundColor: isDeadline ? '#0f0f0f' : '#0a0a0a',
-                border: `1px solid ${isDeadline ? '#333333' : '#222222'}`,
-                borderRadius: '2px',
-                padding: '0.625rem',
+                backgroundColor: 'var(--bg-card-subtle)',
+                border: `1px solid ${isDeadline ? 'var(--border-hover)' : 'var(--border-default)'}`,
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.75rem',
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'space-between',
@@ -84,20 +84,20 @@ export const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({ deadlineDays
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.625rem', fontWeight: 600, color: kickerColor, letterSpacing: '0.06em' }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', fontWeight: 600, color: kickerColor, letterSpacing: '0.04em' }}>
                   {st.day}
                 </span>
                 <IconComp size={14} style={{ color: kickerColor }} />
               </div>
               <div style={{ margin: '0.2rem 0' }}>
-                <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#ffffff' }}>
+                <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)' }}>
                   {st.name}
                 </div>
-                <div style={{ fontSize: '0.6875rem', color: '#888888', marginTop: '0.2rem', lineHeight: 1.3 }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem', lineHeight: 1.35 }}>
                   {st.desc}
                 </div>
               </div>
-              <div style={{ width: '100%', height: '3px', background: '#000000', borderRadius: '1px', overflow: 'hidden' }}>
+              <div style={{ width: '100%', height: '3px', background: 'var(--bg-app)', borderRadius: '1px', overflow: 'hidden' }}>
                 <div style={{ width: `${st.progress}%`, height: '100%', background: progressBarBg }} />
               </div>
             </div>
@@ -106,17 +106,16 @@ export const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({ deadlineDays
       </div>
 
       {/* Bryntum Engine Integration Footer */}
-      <div style={{ marginTop: '0.625rem', paddingTop: '0.5rem', borderTop: '1px solid #1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', color: '#777777' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ffffff', display: 'inline-block' }}></span>
+      <div style={{ marginTop: '0.75rem', paddingTop: '0.625rem', borderTop: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--text-muted)', display: 'inline-block' }}></span>
           <span>Bryntum Project Timeline Protocol • Sponsor Integration</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <span>Deterministic Buffer:</span>
-          <span style={{ color: '#00e575', fontWeight: 600 }}>Soundcheck completed 48 hours prior to launch</span>
+          <span style={{ color: 'var(--status-emerald)', fontWeight: 600 }}>Soundcheck completed 48 hours prior to launch</span>
         </div>
       </div>
     </section>
   );
 };
-

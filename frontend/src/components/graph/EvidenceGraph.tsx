@@ -23,14 +23,14 @@ export const EvidenceGraph: React.FC<EvidenceGraphProps> = ({ report }) => {
       position: { x: 30, y: 40 },
       data: { label: '2x Mic Alpha (Dynamic XLR)' },
       style: {
-        background: '#0b0f19',
-        color: '#f8fafc',
-        border: '1px solid rgba(16, 185, 129, 0.4)',
-        borderRadius: '5px',
+        background: '#161b22',
+        color: '#f0f6fc',
+        border: '1px solid #30363d',
+        borderRadius: '4px',
         padding: '8px 12px',
         fontSize: '12px',
         fontWeight: 500,
-        fontFamily: 'Inter, sans-serif',
+        fontFamily: 'var(--font-sans)',
       },
     },
     {
@@ -38,14 +38,14 @@ export const EvidenceGraph: React.FC<EvidenceGraphProps> = ({ report }) => {
       position: { x: 30, y: 130 },
       data: { label: '2x XLR Balanced Cables (3m)' },
       style: {
-        background: '#0b0f19',
-        color: '#f8fafc',
-        border: '1px solid rgba(16, 185, 129, 0.4)',
-        borderRadius: '5px',
+        background: '#161b22',
+        color: '#f0f6fc',
+        border: '1px solid #30363d',
+        borderRadius: '4px',
         padding: '8px 12px',
         fontSize: '12px',
         fontWeight: 500,
-        fontFamily: 'Inter, sans-serif',
+        fontFamily: 'var(--font-sans)',
       },
     },
     {
@@ -53,14 +53,14 @@ export const EvidenceGraph: React.FC<EvidenceGraphProps> = ({ report }) => {
       position: { x: 280, y: 80 },
       data: { label: 'Interface Two (2 XLR In / 2 TRS Out)' },
       style: {
-        background: '#141c30',
-        color: '#38bdf8',
-        border: '1px solid #38bdf8',
-        borderRadius: '5px',
+        background: '#21262d',
+        color: '#f0f6fc',
+        border: '1px solid #e6edf3',
+        borderRadius: '4px',
         padding: '10px 14px',
         fontSize: '12px',
         fontWeight: 600,
-        fontFamily: 'Inter, sans-serif',
+        fontFamily: 'var(--font-sans)',
       },
     },
     {
@@ -68,14 +68,14 @@ export const EvidenceGraph: React.FC<EvidenceGraphProps> = ({ report }) => {
       position: { x: 30, y: 220 },
       data: { label: '2x Headphones Alpha (Closed-Back)' },
       style: {
-        background: '#0b0f19',
-        color: '#f8fafc',
-        border: '1px solid rgba(16, 185, 129, 0.4)',
-        borderRadius: '5px',
+        background: '#161b22',
+        color: '#f0f6fc',
+        border: '1px solid #30363d',
+        borderRadius: '4px',
         padding: '8px 12px',
         fontSize: '12px',
         fontWeight: 500,
-        fontFamily: 'Inter, sans-serif',
+        fontFamily: 'var(--font-sans)',
       },
     },
     {
@@ -83,14 +83,14 @@ export const EvidenceGraph: React.FC<EvidenceGraphProps> = ({ report }) => {
       position: { x: 550, y: 80 },
       data: { label: 'Host Laptop (Native USB-C Bus)' },
       style: {
-        background: '#0b0f19',
-        color: '#f8fafc',
-        border: '1px solid rgba(56, 189, 248, 0.4)',
-        borderRadius: '5px',
+        background: '#161b22',
+        color: '#f0f6fc',
+        border: '1px solid #30363d',
+        borderRadius: '4px',
         padding: '8px 12px',
         fontSize: '12px',
         fontWeight: 500,
-        fontFamily: 'Inter, sans-serif',
+        fontFamily: 'var(--font-sans)',
       },
     },
     {
@@ -98,23 +98,23 @@ export const EvidenceGraph: React.FC<EvidenceGraphProps> = ({ report }) => {
       position: { x: 280, y: 200 },
       data: { label: 'Rule R2: 2 Input Minimum Sat.' },
       style: {
-        background: 'rgba(16, 185, 129, 0.08)',
-        color: '#34d399',
-        border: '1px dashed rgba(16, 185, 129, 0.4)',
-        borderRadius: '5px',
+        background: 'rgba(63, 185, 80, 0.1)',
+        color: '#3fb950',
+        border: '1px solid #238636',
+        borderRadius: '4px',
         padding: '6px 10px',
         fontSize: '11px',
-        fontFamily: 'JetBrains Mono, monospace',
+        fontFamily: 'var(--font-mono)',
       },
     },
   ], []);
 
   const initialEdges: Edge[] = useMemo(() => [
-    { id: 'e1', source: 'mic-alpha', target: 'xlr-alpha', animated: true, style: { stroke: '#10b981', strokeWidth: 1.5 } },
-    { id: 'e2', source: 'xlr-alpha', target: 'interface-two', animated: true, style: { stroke: '#10b981', strokeWidth: 1.5 } },
-    { id: 'e3', source: 'headphones-alpha', target: 'interface-two', style: { stroke: '#10b981', strokeWidth: 1.5 } },
-    { id: 'e4', source: 'interface-two', target: 'laptop-host', animated: true, style: { stroke: '#38bdf8', strokeWidth: 2 } },
-    { id: 'e5', source: 'interface-two', target: 'req-inputs', style: { stroke: '#10b981', strokeDasharray: '3 3' } },
+    { id: 'e1', source: 'mic-alpha', target: 'xlr-alpha', animated: true, style: { stroke: '#3fb950', strokeWidth: 1.5 } },
+    { id: 'e2', source: 'xlr-alpha', target: 'interface-two', animated: true, style: { stroke: '#3fb950', strokeWidth: 1.5 } },
+    { id: 'e3', source: 'headphones-alpha', target: 'interface-two', style: { stroke: '#3fb950', strokeWidth: 1.5 } },
+    { id: 'e4', source: 'interface-two', target: 'laptop-host', animated: true, style: { stroke: '#f0f6fc', strokeWidth: 2 } },
+    { id: 'e5', source: 'interface-two', target: 'req-inputs', style: { stroke: '#3fb950', strokeDasharray: '3 3' } },
   ], []);
 
   const findings = report?.findings || [];
@@ -122,12 +122,12 @@ export const EvidenceGraph: React.FC<EvidenceGraphProps> = ({ report }) => {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '0.75rem', marginTop: '0.25rem' }}>
       {/* React Flow Canvas */}
-      <div style={{ height: 420, backgroundColor: '#030712', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ height: 420, backgroundColor: '#0d1117', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', position: 'relative', overflow: 'hidden' }}>
         <ReactFlow nodes={initialNodes} edges={initialEdges} fitView>
           <Background color="rgba(255, 255, 255, 0.05)" gap={16} />
           <Controls />
         </ReactFlow>
-        <div style={{ position: 'absolute', bottom: 8, left: 8, fontSize: '0.6875rem', color: 'var(--text-muted)', background: 'rgba(3, 7, 18, 0.85)', padding: '2px 6px', borderRadius: '3px', border: '1px solid var(--border-subtle)' }}>
+        <div style={{ position: 'absolute', bottom: 8, left: 8, fontSize: '0.6875rem', color: 'var(--text-muted)', background: 'var(--bg-card)', padding: '2px 8px', borderRadius: '3px', border: '1px solid var(--border-default)' }}>
           Topology: Mic → Cable → Interface → Laptop
         </div>
       </div>
@@ -136,7 +136,7 @@ export const EvidenceGraph: React.FC<EvidenceGraphProps> = ({ report }) => {
       <div className="surface-panel" style={{ display: 'flex', flexDirection: 'column', height: 420 }}>
         <div style={{ marginBottom: '0.5rem' }}>
           <h4 style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <ShieldCheck size={14} style={{ color: '#38bdf8' }} />
+            <ShieldCheck size={14} style={{ color: 'var(--status-emerald)' }} />
             Deterministic Verification Rules
           </h4>
           <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
@@ -155,7 +155,7 @@ export const EvidenceGraph: React.FC<EvidenceGraphProps> = ({ report }) => {
                 onClick={() => setSelectedFinding(f)}
                 style={{
                   backgroundColor: isSelected ? 'var(--bg-card-hover)' : 'var(--bg-app)',
-                  border: isSelected ? '1px solid #38bdf8' : '1px solid var(--border-subtle)',
+                  border: isSelected ? '1px solid #e6edf3' : '1px solid var(--border-default)',
                   borderRadius: 'var(--radius-xs)',
                   padding: '0.45rem 0.6rem',
                   textAlign: 'left',
@@ -163,7 +163,7 @@ export const EvidenceGraph: React.FC<EvidenceGraphProps> = ({ report }) => {
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  transition: 'all 0.12s ease',
+                  transition: 'background-color 0.12s ease',
                 }}
               >
                 <div>
@@ -191,7 +191,7 @@ export const EvidenceGraph: React.FC<EvidenceGraphProps> = ({ report }) => {
         <div style={{ gridColumn: '1 / -1', background: 'var(--bg-card)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', padding: '0.875rem 1rem', marginTop: '0.25rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
             <span style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <FileText size={14} style={{ color: '#38bdf8' }} />
+              <FileText size={14} style={{ color: 'var(--text-primary)' }} />
               Rule Citation: <code style={{ fontFamily: 'var(--font-mono)' }}>{selectedFinding.rule_id}</code> ({selectedFinding.reason_code})
             </span>
             <button
