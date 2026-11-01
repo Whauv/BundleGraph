@@ -14,7 +14,7 @@ const MainView: React.FC = () => {
 
   return (
     <main className="main-content">
-      <Suspense fallback={<div className="screen-container" role="status">Loading interface…</div>}>
+      <Suspense fallback={<div className="screen-container" role="status" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading interface…</div>}>
         {currentStep === 'builder' && <RequestBuilder />}
         {currentStep === 'review' && <RequirementsReview />}
         {currentStep === 'comparison' && <BundleComparison />}
@@ -29,10 +29,13 @@ const RuntimeFooter: React.FC = () => {
   const { runtimeMode, runtimeLabel } = useDemo();
 
   return (
-    <footer style={{ backgroundColor: '#000000', borderTop: '1px solid #222222', padding: '0.625rem 1.25rem', fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', color: '#666666' }}>
-      <div style={{ maxWidth: '1440px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-        <span>BundleGraph · deterministic compatibility presentation</span>
-        <span style={{ color: runtimeMode === 'fixture' ? '#fabc45' : '#00e575' }}>
+    <footer style={{ backgroundColor: 'var(--bg-header)', borderTop: '1px solid var(--border-default)', padding: '0.75rem 1.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+      <div style={{ maxWidth: '1400px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: runtimeMode === 'fixture' ? 'var(--status-amber)' : 'var(--status-emerald)', display: 'inline-block' }} />
+          <span>BundleGraph · deterministic compatibility presentation</span>
+        </div>
+        <span style={{ color: runtimeMode === 'fixture' ? 'var(--status-amber)' : 'var(--status-emerald)', fontWeight: 600 }}>
           {runtimeLabel} · {runtimeMode === 'fixture' ? 'no provider, approval, or payment calls' : 'demo endpoints only'}
         </span>
       </div>

@@ -1,7 +1,7 @@
 import React from 'react';
 import { useDemo } from '../../store/demoStore';
 import type { ScreenStep } from '../../types/bundlegraph';
-import { Terminal, CheckSquare, GitCompare, Lock, Activity } from 'lucide-react';
+import { Terminal, CheckSquare, GitCompare, Lock, Activity, Check } from 'lucide-react';
 
 interface StepItem {
   id: ScreenStep;
@@ -11,56 +11,41 @@ interface StepItem {
 }
 
 const STEPS: StepItem[] = [
-  { id: 'builder', label: 'Request Builder', number: 1, icon: Terminal },
-  { id: 'review', label: 'Requirements Review', number: 2, icon: CheckSquare },
-  { id: 'comparison', label: 'Comparison & Graph', number: 3, icon: GitCompare },
-  { id: 'approval', label: 'Plan Authorization', number: 4, icon: Lock },
-  { id: 'execution', label: 'Execution & Recovery', number: 5, icon: Activity },
+  { id: 'builder', label: '1. Request Builder', number: 1, icon: Terminal },
+  { id: 'review', label: '2. Requirements Review', number: 2, icon: CheckSquare },
+  { id: 'comparison', label: '3. Comparison & Graph', number: 3, icon: GitCompare },
+  { id: 'approval', label: '4. Plan Authorization', number: 4, icon: Lock },
+  { id: 'execution', label: '5. Execution & Recovery', number: 5, icon: Activity },
 ];
+
+const STEP_ORDER: ScreenStep[] = ['builder', 'review', 'comparison', 'approval', 'execution'];
 
 export const StepNav: React.FC = () => {
   const { currentStep, setStep } = useDemo();
+  const currentIndex = STEP_ORDER.indexOf(currentStep);
 
   return (
-    <div style={{ height: '44px', width: '100%', backgroundColor: '#000000', borderBottom: '1px solid #222222', padding: '0 1.25rem' }}>
-      <nav className="step-nav" style={{ height: '100%', padding: 0, borderBottom: 'none', gap: '0.25rem' }} aria-label="Demo workflow navigation">
-        {STEPS.map((step) => {
+    <div className="step-nav-bar">
+      <nav className="step-nav" aria-label="Demo workflow navigation">
+        {STEPS.map((step, idx) => {
           const isActive = currentStep === step.id;
+          const isCompleted = idx < currentIndex;
           const IconComponent = step.icon;
 
           return (
             <button
               key={step.id}
               type="button"
-              className={`step-tab ${isActive ? 'active' : ''}`}
+              className={`step-tab ${isActive ? 'active' : ''} ${isCompleted ? 'completed' : ''}`}
               onClick={() => setStep(step.id)}
               aria-current={isActive ? 'step' : undefined}
-              style={{
-                height: '100%',
-                padding: '0 1rem',
-                borderBottom: isActive ? '2px solid #ffffff' : '2px solid transparent',
-              }}
+              title={`Switch to ${step.label}`}
             >
-              <span
-                style={{
-                  width: '18px',
-                  height: '18px',
-                  borderRadius: '2px',
-                  backgroundColor: isActive ? '#000000' : '#141414',
-                  color: isActive ? '#ffffff' : '#888888',
-                  border: `1px solid ${isActive ? '#000000' : '#222222'}`,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '0.625rem',
-                  fontWeight: 700,
-                }}
-              >
-                {step.number}
+              <span className="step-number">
+                {isCompleted ? <Check size={12} strokeWidth={3} /> : step.number}
               </span>
-              <IconComponent size={13} style={{ opacity: isActive ? 1 : 0.6 }} />
-              <span style={{ fontWeight: isActive ? 600 : 500 }}>{step.label}</span>
+              <IconComponent size={15} style={{ opacity: isActive ? 1 : 0.7 }} />
+              <span>{step.label}</span>
             </button>
           );
         })}

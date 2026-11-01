@@ -6,7 +6,8 @@ import {
   ArrowRight, 
   CreditCard, 
   AlertTriangle, 
-  CheckCircle2
+  CheckCircle2,
+  Lock
 } from 'lucide-react';
 
 export const PlanApproval: React.FC = () => {
@@ -45,68 +46,28 @@ export const PlanApproval: React.FC = () => {
   };
 
   return (
-    <div className="screen-container" style={{ gap: '1rem' }}>
-      {/* Pipeline Breadcrumb Ribbon */}
-      <div
-        style={{
-          width: '100%',
-          backgroundColor: '#0a0a0a',
-          border: '1px solid #222222',
-          padding: '0.5rem 0.875rem',
-          borderRadius: '2px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '0.5rem',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.6875rem' }}>
-          <span style={{ color: '#666666', cursor: 'pointer' }} onClick={() => setStep('builder')}>1. Request Builder</span>
-          <span style={{ color: '#333333' }}>/</span>
-          <span style={{ color: '#666666', cursor: 'pointer' }} onClick={() => setStep('review')}>2. Requirements Review</span>
-          <span style={{ color: '#333333' }}>/</span>
-          <span style={{ color: '#666666', cursor: 'pointer' }} onClick={() => setStep('comparison')}>3. Comparison &amp; Graph</span>
-          <span style={{ color: '#333333' }}>/</span>
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              padding: '0.25rem 0.6rem',
-              backgroundColor: '#141414',
-              border: '1px solid #333333',
-              borderRadius: '2px',
-              color: '#ffffff',
-              fontWeight: 600,
-            }}
-          >
-            <span
-              style={{
-                width: '16px',
-                height: '16px',
-                borderRadius: '2px',
-                backgroundColor: '#ffffff',
-                color: '#000000',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontWeight: 700,
-                fontSize: '0.625rem',
-              }}
-            >
-              4
-            </span>
-            <span>Plan Authorization</span>
-          </span>
-          <span style={{ color: '#333333' }}>/</span>
-          <span style={{ color: '#666666' }}>5. Execution &amp; Recovery</span>
+    <div className="screen-container">
+      {/* Modern Screen Header */}
+      <div className="screen-header">
+        <div className="screen-header-left">
+          <div className="screen-header-icon">
+            <Lock size={20} />
+          </div>
+          <div>
+            <h1 className="screen-title">Stage 4: Cryptographic Plan Binding &amp; Authorization</h1>
+            <p className="screen-description">
+              Authorize an immutable plan manifest. The authorization token cryptographically binds to this exact version hash and total.
+            </p>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.625rem' }}>
-          <span style={{ color: '#666666', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Binding Protocol:</span>
-          <span style={{ padding: '0.15rem 0.4rem', borderRadius: '2px', backgroundColor: '#111111', border: '1px solid #222222', color: '#00e575', fontWeight: 600 }}>
-            SHA256_MUTATION_LOCKED
+        <div className="screen-header-meta">
+          <span className="badge badge-emerald">
+            <ShieldCheck size={12} />
+            <span>SHA256 Mutation Locked</span>
+          </span>
+          <span className="badge badge-neutral">
+            <span>PayPal Sandbox v2 Bound</span>
           </span>
         </div>
       </div>
@@ -114,96 +75,61 @@ export const PlanApproval: React.FC = () => {
       <div className="studio-card">
         <div className="card-header">
           <div className="card-title-group">
-            <h1 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-              <span
-                style={{
-                  width: '24px',
-                  height: '24px',
-                  borderRadius: '2px',
-                  backgroundColor: '#161616',
-                  border: '1px solid #333333',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '0.75rem',
-                  fontWeight: 700,
-                  color: '#ffffff',
-                }}
-              >
-                🔒
-              </span>
-              <span>Cryptographic Plan Binding &amp; Authorization</span>
-            </h1>
+            <h2 className="card-title">Manifest Verification &amp; Escrow Pre-Authorization</h2>
             <p className="card-subtitle">
-              Authorize an immutable plan manifest. The authorization token binds to this exact version hash and total; material merchant deltas invalidate this token.
+              Any upstream merchant price delta or stock variance revokes this token immediately, ensuring zero unauthorized mutations at checkout.
             </p>
           </div>
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              padding: '0.25rem 0.6rem',
-              borderRadius: '2px',
-              backgroundColor: '#111111',
-              border: '1px solid #282828',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '0.6875rem',
-              color: '#ffffff',
-            }}
-          >
-            <ShieldCheck size={14} style={{ color: '#00e575' }} />
-            <span>PayPal Payments v2 Bound</span>
-          </div>
+          <span className="badge badge-emerald">
+            <span>Ready for Capture</span>
+          </span>
         </div>
 
-        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           {/* Plan Version Lock Summary Grid (4 Boxes) */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
-            <div style={{ backgroundColor: '#000000', border: '1px solid #222222', borderRadius: '2px', padding: '0.875rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.5rem' }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.625rem', color: '#666666', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '1rem' }}>
+            <div className="surface-panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.5rem' }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 Durable Plan Reference
               </span>
-              <div style={{ fontSize: '0.9375rem', fontWeight: 600, fontFamily: 'var(--font-mono)', color: '#ffffff' }}>
+              <div style={{ fontSize: '1rem', fontWeight: 600, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
                 {approvalRecord?.plan_id || selectedProposal?.proposal_key || 'plan-v1-8f92'}
               </div>
             </div>
 
-            <div style={{ backgroundColor: '#000000', border: '1px solid #222222', borderRadius: '2px', padding: '0.875rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.5rem' }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.625rem', color: '#666666', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <div className="surface-panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.5rem' }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 Plan Manifest Version
               </span>
-              <div style={{ fontSize: '0.9375rem', fontWeight: 600, fontFamily: 'var(--font-mono)', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                <CheckCircle2 size={13} style={{ color: '#00e575' }} />
+              <div style={{ fontSize: '1rem', fontWeight: 600, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <CheckCircle2 size={15} style={{ color: 'var(--status-emerald)' }} />
                 <span>Version 1.0 (Locked)</span>
               </div>
             </div>
 
-            <div style={{ backgroundColor: '#000000', border: '1px solid #222222', borderRadius: '2px', padding: '0.875rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.5rem' }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.625rem', color: '#666666', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <div className="surface-panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.5rem' }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 Approval Session Token
               </span>
-              <div style={{ fontSize: '0.9375rem', fontWeight: 600, fontFamily: 'var(--font-mono)', color: '#00e575' }}>
+              <div style={{ fontSize: '1rem', fontWeight: 600, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
                 {approvalRecord?.approval_id || 'appr-token-bound-v1'}
               </div>
             </div>
 
-            <div style={{ backgroundColor: '#000000', border: '1px solid #222222', borderRadius: '2px', padding: '0.875rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.5rem' }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.625rem', color: '#666666', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <div className="surface-panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.5rem' }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 Authorized All-In Total
               </span>
-              <div style={{ fontSize: '1.25rem', fontWeight: 700, fontFamily: 'var(--font-mono)', color: '#ffffff', display: 'flex', alignItems: 'baseline', gap: '0.25rem' }}>
+              <div style={{ fontSize: '1.25rem', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', display: 'flex', alignItems: 'baseline', gap: '0.35rem' }}>
                 <span>${amountDollars}</span>
-                <span style={{ fontSize: '0.6875rem', color: '#888888', fontWeight: 500 }}>USD</span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 500 }}>USD</span>
               </div>
             </div>
           </div>
 
           {/* Itemized Order Review Table */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontFamily: 'var(--font-mono)', fontSize: '0.625rem', color: '#666666', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              <span style={{ color: '#444444' }}>#</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
               <span>Itemized Manifest Specifications</span>
             </div>
 
@@ -218,28 +144,28 @@ export const PlanApproval: React.FC = () => {
                     <th>Fulfillment Source</th>
                   </tr>
                 </thead>
-                <tbody style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>
+                <tbody style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem' }}>
                   {selectedProposal?.line_items.map((item, idx) => (
-                    <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#000000' : '#080808' }}>
-                      <td style={{ fontWeight: 600, color: '#ffffff' }}>
+                    <tr key={idx}>
+                      <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#00e575', display: 'inline-block' }} />
+                          <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--status-emerald)', display: 'inline-block' }} />
                           <span>{item.product_id}</span>
-                          <span style={{ color: '#777777', fontFamily: 'var(--font-sans)', fontSize: '0.75rem', fontWeight: 400 }}>
+                          <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', fontSize: '0.75rem', fontWeight: 400 }}>
                             {nameMap[item.product_id] || ''}
                           </span>
                         </div>
                       </td>
-                      <td style={{ textAlign: 'center', color: '#ffffff' }}>
+                      <td style={{ textAlign: 'center', color: 'var(--text-primary)' }}>
                         {item.quantity}
                       </td>
-                      <td style={{ textAlign: 'right', color: '#aaaaaa' }}>
+                      <td style={{ textAlign: 'right', color: 'var(--text-secondary)' }}>
                         ${(item.unit_price.amount_minor / 100).toFixed(2)}
                       </td>
-                      <td style={{ textAlign: 'right', color: '#ffffff', fontWeight: 600 }}>
+                      <td style={{ textAlign: 'right', color: 'var(--text-primary)', fontWeight: 600 }}>
                         ${(item.merchandise_total.amount_minor / 100).toFixed(2)}
                       </td>
-                      <td style={{ color: '#666666', fontSize: '0.6875rem' }}>
+                      <td style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
                         synthetic-offline-merchant
                       </td>
                     </tr>
@@ -249,88 +175,48 @@ export const PlanApproval: React.FC = () => {
             </div>
           </div>
 
-          {/* Plan Binding Cryptographic Policy Alert */}
-          <div
-            style={{
-              padding: '0.875rem 1rem',
-              backgroundColor: '#0a0a0a',
-              border: '1px solid #282828',
-              borderRadius: '2px',
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: '0.75rem',
-            }}
-          >
-            <ShieldCheck size={18} style={{ color: '#00e575', flexShrink: 0, marginTop: '2px' }} />
-            <div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', fontWeight: 700, color: '#ffffff', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' }}>
-                Plan Binding Policy:
-              </div>
-              <p style={{ fontSize: '0.8125rem', color: '#888888', lineHeight: 1.5, margin: 0 }}>
-                The issued approval token is cryptographically bound to the exact offer IDs and price sum. Any upstream merchant price delta or stock variance revokes this token immediately, ensuring zero unauthorized mutations at checkout.
-              </p>
-            </div>
-          </div>
-
           {/* Fault Injection Simulator Card */}
-          <div
-            style={{
-              padding: '0.875rem 1rem',
-              backgroundColor: '#0a0a0a',
-              border: '1px solid rgba(250, 188, 69, 0.4)',
-              borderRadius: '2px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: '1rem',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <AlertTriangle size={18} style={{ color: '#fabc45', flexShrink: 0 }} />
+          <div className="callout callout-warning" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem' }}>
+              <AlertTriangle size={20} style={{ color: 'var(--status-amber)', flexShrink: 0 }} />
               <div>
-                <strong style={{ color: '#fabc45', fontSize: '0.8125rem', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
-                  Failure Injection Simulation:
+                <strong style={{ color: 'var(--status-amber)', fontSize: '0.8125rem', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
+                  Test Recovery Scenario: Simulate Stock Outage:
                 </strong>
-                <p style={{ fontSize: '0.75rem', color: '#888888', marginTop: '0.15rem', margin: 0 }}>
-                  Inject merchant zero-inventory condition on checkout to test the PayPal approval invalidation hook and automatic re-planning flow.
+                <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginTop: '0.2rem', margin: 0 }}>
+                  Inject merchant zero-inventory condition on checkout to verify the automatic re-planning flow and dependency preservation.
                 </p>
               </div>
             </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 600, color: '#ffffff', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', padding: '0.35rem 0.65rem', backgroundColor: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: 'var(--radius-sm)' }}>
               <input
                 type="checkbox"
                 checked={simulateFailure}
                 onChange={(e) => setSimulateFailure(e.target.checked)}
-                style={{ width: '15px', height: '15px', accentColor: '#fabc45', cursor: 'pointer' }}
+                style={{ width: '16px', height: '16px', accentColor: '#f59e0b', cursor: 'pointer' }}
               />
               <span>Inject Stock Outage</span>
             </label>
           </div>
         </div>
 
-        <div className="card-footer" style={{ borderTop: '1px solid #222222', backgroundColor: '#050505', padding: '1rem 1.25rem' }}>
+        {/* Footer Navigation Bar */}
+        <div className="card-footer">
           <button
             type="button"
             className="btn-secondary"
             onClick={() => setStep('comparison')}
           >
-            <ArrowLeft size={14} />
+            <ArrowLeft size={16} />
             <span>Back to Bundle Comparison</span>
           </button>
 
           <button
             type="button"
-            className="btn-primary"
+            className="btn-primary btn-lg"
             onClick={handleCheckout}
             disabled={isLoading}
-            style={{
-              padding: '0.55rem 1.25rem',
-              fontSize: '0.875rem',
-              backgroundColor: '#ffffff',
-              color: '#000000',
-              minWidth: '260px',
-            }}
+            style={{ minWidth: '280px' }}
           >
             {isLoading ? (
               <>
@@ -339,9 +225,9 @@ export const PlanApproval: React.FC = () => {
               </>
             ) : (
               <>
-                <CreditCard size={14} />
+                <CreditCard size={16} />
                 <span>Authorize &amp; Bind Plan (${amountDollars})</span>
-                <ArrowRight size={15} />
+                <ArrowRight size={16} />
               </>
             )}
           </button>
