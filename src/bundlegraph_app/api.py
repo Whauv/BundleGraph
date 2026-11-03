@@ -7,10 +7,11 @@ bodies alone — they always reference stored, versioned plans.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -42,6 +43,8 @@ from .requirements import CatalogRepository, InMemoryCatalogRepository, InMemory
 from .discovery import CandidateDiscovery, CatalogCandidateDiscovery
 from .observability import log_request, request_started
 from .paypal import PayPalWebhookVerifier, RejectingWebhookVerifier
+from .paypal_browser import BrowserPaymentError, BrowserPaymentOrchestrator
+from .paypal_webhook import DirectWebhookVerifier, RejectingDirectWebhookVerifier, body_fingerprint, collect_transmission_headers, extract_operation_id, extract_resource_reference
 from .state import Approval, Money, PaymentOperation, Plan, WebhookEvent
 
 
@@ -162,6 +165,26 @@ class ReconcilePaymentBody(BaseModel):
     operation_id: str = Field(min_length=1)
 
 
+class CreateBrowserOrderBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    approval_id: str = Field(min_length=1)
+    operation_id: str = Field(min_length=1)
+    merchant_allocation_id: str = Field(min_length=1)
+
+
+class CompleteBrowserOrderBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation_id: str = Field(min_length=1)
+
+
+class CancelBrowserOrderBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation_id: str = Field(min_length=1)
+
+
 class WebhookBody(BaseModel):
     event_id: str = Field(min_length=1)
     event_type: str = Field(min_length=1)
@@ -201,6 +224,9 @@ def build_app(
     frontend_directory: str | None = None,
     runtime_name: str = "test",
     candidate_discovery: CandidateDiscovery | None = None,
+    browser_payment_orchestrator: BrowserPaymentOrchestrator | None = None,
+    direct_webhook_verifier: DirectWebhookVerifier | None = None,
+    browser_return_base_url: str | None = None,
 ) -> FastAPI:
     """Return a FastAPI application wired to the given authoritative service.
 
@@ -226,6 +252,7 @@ def build_app(
     if allowed_origins:
         app.add_middleware(CORSMiddleware, allow_origins=list(allowed_origins), allow_credentials=True, allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "X-Correlation-ID"])
     verifier = webhook_verifier or RejectingWebhookVerifier()
+    direct_verifier = direct_webhook_verifier or RejectingDirectWebhookVerifier()
     readiness_checks = readiness or {"persistence": False, "authentication": False, "paypal": False, "webhook_verifier": False}
     auth = authentication_provider or RejectingAuthenticationProvider()
     owners = ownership or InMemoryResourceOwnershipRepository()
@@ -532,6 +559,102 @@ def build_app(
         )
         advanced = service.record_webhook_event(event)
         return WebhookEnvelope(recorded=advanced)
+
+    @app.post("/webhooks/paypal/direct")
+    async def paypal_direct_webhook(request: Request) -> dict[str, Any]:
+        raw_body = await request.body()
+        if not raw_body:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "empty webhook body")
+        headers = collect_transmission_headers(dict(request.headers))
+        if headers is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "missing PayPal transmission headers")
+        try:
+            event = json.loads(raw_body.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "webhook body is not JSON") from exc
+        if not isinstance(event, dict):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "webhook body must be a JSON object")
+        event_id = event.get("id")
+        event_type = event.get("event_type")
+        if not isinstance(event_id, str) or not event_id.strip() or not isinstance(event_type, str) or not event_type.strip():
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "webhook body missing id or event_type")
+        if not direct_verifier.verify(headers=headers, event=event):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "webhook signature verification failed")
+        webhook_event = WebhookEvent(
+            event_id=event_id.strip(),
+            event_type=event_type.strip(),
+            received_at=datetime.now(UTC),
+            verified=True,
+            resource_reference=extract_resource_reference(event),
+            operation_id=extract_operation_id(event),
+            raw_payload_fingerprint=body_fingerprint(raw_body),
+        )
+        advanced = service.record_webhook_event(webhook_event)
+        return {"recorded": advanced, "event_id": webhook_event.event_id}
+
+    if browser_payment_orchestrator is not None:
+        orchestrator = browser_payment_orchestrator
+        return_base = (browser_return_base_url or "").rstrip("/")
+
+        @app.post("/payments/browser/create-order")
+        def create_browser_order(body: CreateBrowserOrderBody, identity: Identity = Depends(require_identity)) -> dict[str, Any]:
+            require_role(identity, "payments:execute")
+            require_owner(identity, "approval", body.approval_id)
+            try:
+                created = orchestrator.create_order(
+                    approval_id=body.approval_id,
+                    operation_id=body.operation_id,
+                    merchant_allocation_id=body.merchant_allocation_id,
+                )
+            except BrowserPaymentError as exc:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+            owners.claim("operation", created.operation_id, identity.subject)
+            payload: dict[str, Any] = {
+                "operation_id": created.operation_id,
+                "order_id": created.order_id,
+                "approval_url": created.approval_url,
+                "amount": created.amount.model_dump(mode="json"),
+                "merchant_reference": created.merchant_reference,
+                "status": "awaiting_buyer_approval",
+            }
+            if return_base:
+                payload["return_url"] = f"{return_base}/payments/browser/return?operation_id={created.operation_id}"
+                payload["cancel_url"] = f"{return_base}/payments/browser/cancel?operation_id={created.operation_id}"
+            return payload
+
+        @app.post("/payments/browser/complete-order")
+        def complete_browser_order(body: CompleteBrowserOrderBody, identity: Identity = Depends(require_identity)) -> dict[str, Any]:
+            require_role(identity, "payments:execute")
+            require_owner(identity, "operation", body.operation_id)
+            try:
+                completed = orchestrator.complete_order(operation_id=body.operation_id)
+            except BrowserPaymentError as exc:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+            owners.claim("operation", completed.capture_operation_id, identity.subject)
+            return {
+                "authorize_operation_id": completed.authorize_operation_id,
+                "capture_operation_id": completed.capture_operation_id,
+                "order_id": completed.order_id,
+                "authorization_reference": completed.authorization_reference,
+                "capture_reference": completed.capture_reference,
+                "status": completed.status,
+                "amount": completed.amount.model_dump(mode="json"),
+                "merchant_reference": completed.merchant_reference,
+            }
+
+        @app.post("/payments/browser/cancel-order")
+        def cancel_browser_order(body: CancelBrowserOrderBody, identity: Identity = Depends(require_identity)) -> dict[str, Any]:
+            require_role(identity, "payments:execute")
+            require_owner(identity, "operation", body.operation_id)
+            try:
+                operation = orchestrator.cancel_order(operation_id=body.operation_id)
+            except BrowserPaymentError as exc:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+            return {
+                "operation_id": operation.operation_id,
+                "status": operation.status.value,
+                "failure_reason_code": operation.failure_reason_code,
+            }
 
     if frontend_directory:
         app.mount("/", StaticFiles(directory=frontend_directory, html=True), name="frontend")

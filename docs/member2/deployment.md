@@ -10,8 +10,12 @@ because the real secrets still need to be rotated through Render's secret UI.
 - `demo` is the offline fixture UI with in-memory state and rejecting authentication.
 - `application` is the durable PostgreSQL-backed requirement, planning, evidence,
   ownership, and approval runtime. Payments and webhooks remain disabled.
-- `production` remains fail-closed until the real PayPal Orders transport and
-  webhook verifier are configured; it never falls back to fake adapters.
+- `production` wires PostgreSQL repositories, OIDC (or configured bearer)
+  authentication, Groq structured extraction, the live PayPal Sandbox
+  `PayPalSandboxOrdersClient`, the direct webhook signature verifier, and the
+  active trusted catalog. The browser payment journey and the public PayPal
+  webhook endpoint are only mounted in this mode. Startup fails fast if any
+  secret is missing.
 
 ## Local
 
@@ -48,6 +52,8 @@ Environment variables:
 | `PAYPAL_APPROVED_ORDER_ID` | opt-in smoke only | Buyer-approved sandbox order consumed by the live lifecycle smoke test. |
 | `BUNDLEGRAPH_RUN_PAYPAL_SMOKE` | opt-in smoke only | Must equal `1` before the sandbox test can make money-state calls. |
 | `BUNDLEGRAPH_FRONTEND_ORIGINS` | when frontend is cross-origin | Explicit comma-separated browser origins allowed to call the API. Wildcards and non-HTTP(S) origins are rejected. |
+| `BUNDLEGRAPH_PUBLIC_BASE_URL` | prod browser journey | Public HTTPS base URL the browser payment journey returns to for `return_url` and `cancel_url`. Omit it when the server is unreachable from the public internet. |
+| `GROQ_API_KEY` / `GROQ_MODEL` | yes (prod) | Groq structured extraction credentials for the requirement interpreter. |
 
 ## Hosted (Render)
 

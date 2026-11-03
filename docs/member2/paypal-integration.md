@@ -81,3 +81,37 @@ Operator checklist before enabling the live client:
   are all configured.
 - Rotate the client secret through the deployment secret manager; do not read
   it from a `.env` file in the repository.
+
+## Browser payment journey (production mode)
+
+`BUNDLEGRAPH_MODE=production` wires `BrowserPaymentOrchestrator` to the live
+`PayPalSandboxOrdersClient`. The journey is three authenticated endpoints:
+
+- `POST /payments/browser/create-order` — accepts an `approval_id`,
+  `operation_id`, and `merchant_allocation_id`. The orchestrator reads the
+  persisted plan version, resolves the amount and merchant reference from the
+  stored `MerchantAllocation`, and calls `create_order` with that amount only.
+  It persists an `AUTHORIZE` payment operation at `SUBMITTED` with
+  `provider_reference = <order_id>` and returns the PayPal `approval_url`
+  along with server-generated `return_url` and `cancel_url` values anchored on
+  `BUNDLEGRAPH_PUBLIC_BASE_URL`. Browser callers cannot override the amount or
+  recipient: the request body rejects both fields.
+- `POST /payments/browser/complete-order` — accepts the stored `operation_id`,
+  calls `authorize_order` and then `capture_authorization` with the persisted
+  amount. On success the capture is persisted as a child operation and the
+  response carries the live PayPal order, authorization, and capture
+  references plus the final capture status.
+- `POST /payments/browser/cancel-order` — accepts the stored `operation_id` and
+  marks the operation `FAILED` with reason `BUYER_CANCELLED`. No PayPal call
+  is made.
+
+## Direct PayPal webhook endpoint
+
+`POST /webhooks/paypal/direct` is public (no bearer required). The handler
+reads the raw request body and the five `PayPal-Transmission-*` headers,
+forwards them to `/v1/notifications/verify-webhook-signature` with the
+configured `PAYPAL_WEBHOOK_ID`, and only then records the event. Unverified
+deliveries return HTTP 401; malformed envelopes return 400. The event id is a
+primary key in `bundlegraph_webhook_events`, so replayed deliveries are
+de-duplicated at the storage layer and surface as `recorded: false`. The raw
+body is fingerprinted (SHA-256) and persisted on the stored event for audit.

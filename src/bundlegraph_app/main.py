@@ -12,6 +12,9 @@ from pathlib import Path
 from .api import build_app
 from .application import ApplicationService
 from .paypal import DisabledPayPalClient, FakeSandboxClient, PayPalAdapter
+from .paypal_browser import BrowserPaymentOrchestrator
+from .paypal_sandbox import PayPalSandboxOrdersClient
+from .paypal_webhook import PayPalDirectWebhookVerifier
 from .persistence import new_in_memory_repositories
 from .planning import PlanningInputsRepository
 from .config import RuntimeMode, application_settings, frontend_origins, production_settings, runtime_mode
@@ -92,9 +95,95 @@ def build_application_app() -> "FastAPI":  # noqa: F821
 
 
 def build_production_app() -> "FastAPI":  # noqa: F821
-    """Validate configuration, then fail closed until all production adapters exist."""
-    production_settings()
-    raise RuntimeError("production startup blocked: PostgreSQL, authentication, PayPal Orders, and webhook verifier adapters are not configured")
+    """Wire PostgreSQL, OIDC, Groq, the live PayPal sandbox, and the webhook verifier."""
+    settings = production_settings()
+    plans = PostgresPlanRepository(settings.database_url)
+    approvals = PostgresApprovalRepository(settings.database_url)
+    payments = PostgresPaymentRepository(settings.database_url)
+    webhooks = PostgresWebhookEventRepository(settings.database_url)
+    evidence_reader = PostgresEvidenceReader(settings.database_url)
+    planning = PostgresPlanningInputsRepository(settings.database_url)
+    drafts = PostgresRequirementDraftRepository(settings.database_url)
+    catalogs = PostgresCatalogRepository(settings.database_url)
+    ownership = PostgresResourceOwnershipRepository(settings.database_url)
+    oidc_url = os.getenv("BUNDLEGRAPH_OIDC_INTROSPECTION_URL", "").strip()
+    oidc_client_id = os.getenv("BUNDLEGRAPH_OIDC_CLIENT_ID", "").strip()
+    oidc_client_secret = os.getenv("BUNDLEGRAPH_OIDC_CLIENT_SECRET", "").strip()
+    if oidc_url and oidc_client_id and oidc_client_secret:
+        auth = OidcIntrospectionAuthenticationProvider(
+            oidc_url,
+            oidc_client_id,
+            oidc_client_secret,
+            expected_audience=(os.getenv("BUNDLEGRAPH_OIDC_AUDIENCE") or None),
+        )
+    else:
+        bearer_identities = _bearer_identities_from_env()
+        if not bearer_identities:
+            raise RuntimeError("production startup blocked: configure OIDC or BUNDLEGRAPH_AUTH_IDENTITIES")
+        auth = ConfiguredBearerAuthenticationProvider(bearer_identities)
+    orders_client = PayPalSandboxOrdersClient(settings.paypal_client_id, settings.paypal_client_secret)
+    direct_webhook_verifier = PayPalDirectWebhookVerifier(orders_client, settings.paypal_webhook_id)
+    paypal_adapter = PayPalAdapter(DisabledPayPalClient(), settings.sandbox_recipients)
+    service = ApplicationService(
+        plans=plans,
+        approvals=approvals,
+        payments=payments,
+        webhook_events=webhooks,
+        evidence_reader=evidence_reader,
+        paypal=paypal_adapter,
+    )
+    database_ready = postgres_ready(settings.database_url)
+    catalog_ready = database_ready and catalogs.get_active() is not None
+    channel3_key = os.getenv("CHANNEL3_API_KEY", "").strip()
+    discovery = Channel3CandidateDiscovery(Channel3DiscoveryAdapter.from_api_key(channel3_key)) if channel3_key else CatalogCandidateDiscovery(catalogs)
+    extraction_provider = configured_provider()
+    orchestrator = BrowserPaymentOrchestrator(
+        orders_client=orders_client,
+        payments=payments,
+        approvals=approvals,
+        plans=plans,
+    )
+    return_base_url = os.getenv("BUNDLEGRAPH_PUBLIC_BASE_URL", "").strip() or None
+    return build_app(
+        service,
+        evidence_reader,
+        planning,
+        readiness={"persistence": database_ready, "authentication": True, "catalog": catalog_ready, "candidate_provider": bool(channel3_key), "model_provider": True, "paypal": True, "webhook_verifier": True},
+        allowed_origins=frontend_origins(),
+        authentication_provider=auth,
+        ownership=ownership,
+        requirement_drafts=drafts,
+        catalog_repository=catalogs,
+        extraction_provider=extraction_provider,
+        frontend_directory=str(_frontend_directory()),
+        runtime_name="production",
+        candidate_discovery=discovery,
+        browser_payment_orchestrator=orchestrator,
+        direct_webhook_verifier=direct_webhook_verifier,
+        browser_return_base_url=return_base_url,
+    )
+
+
+def _bearer_identities_from_env() -> dict[str, "Identity"]:
+    raw = os.getenv("BUNDLEGRAPH_AUTH_IDENTITIES", "").strip()
+    if not raw:
+        return {}
+    import json
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("BUNDLEGRAPH_AUTH_IDENTITIES must be valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise RuntimeError("BUNDLEGRAPH_AUTH_IDENTITIES must be a JSON object")
+    identities: dict[str, Identity] = {}
+    for token_hash, record in parsed.items():
+        if not isinstance(record, dict) or not isinstance(record.get("subject"), str):
+            raise RuntimeError("BUNDLEGRAPH_AUTH_IDENTITIES entries require subject and roles")
+        roles = record.get("roles", [])
+        if not isinstance(roles, list) or any(not isinstance(role, str) for role in roles):
+            raise RuntimeError("BUNDLEGRAPH_AUTH_IDENTITIES roles must be a list of strings")
+        identities[token_hash] = Identity(subject=record["subject"], roles=frozenset(roles))
+    return identities
 
 
 def _build() -> "FastAPI":  # noqa: F821
