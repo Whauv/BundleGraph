@@ -36,6 +36,10 @@ Environment variables:
 | `BUNDLEGRAPH_MODE` | yes (application/prod) | `application` selects durable planning with payments disabled; `production` is fail-closed. |
 | `DATABASE_URL` | yes (application/prod) | PostgreSQL connection URL; keep it in the deployment secret manager. |
 | `BUNDLEGRAPH_AUTH_IDENTITIES` | yes (application) | JSON map of SHA-256 opaque-token hashes to `{subject, roles}`. |
+| `BUNDLEGRAPH_OIDC_INTROSPECTION_URL` | alternative auth | RFC 7662 endpoint used to validate short-lived access tokens. |
+| `BUNDLEGRAPH_OIDC_CLIENT_ID` | with OIDC | Confidential server-side introspection client ID. |
+| `BUNDLEGRAPH_OIDC_CLIENT_SECRET` | with OIDC | Confidential server-side introspection client secret. |
+| `BUNDLEGRAPH_OIDC_AUDIENCE` | optional | Expected access-token audience; mismatches fail closed. |
 | `CHANNEL3_API_KEY` | optional | Enables live candidate discovery; without it discovery reads the active labeled catalog. |
 | `BUNDLEGRAPH_SANDBOX_RECIPIENTS` | yes (prod) | Comma-separated allowlist of sandbox merchant references the adapter may transact with. |
 | `PAYPAL_CLIENT_ID` | yes (prod) | PayPal sandbox OAuth client id. |

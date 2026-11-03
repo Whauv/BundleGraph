@@ -1,12 +1,19 @@
 # Phase 4 application integration
 
-No live model provider is configured. Member 2 now supplies the API router,
+The optional Groq adapter supplies a live model provider when Member 2 configures
+`GROQ_API_KEY` and an explicitly selected `GROQ_MODEL` server-side. Member 2 now supplies the API router,
 PostgreSQL adapters, authentication, ownership checks, IDs, and the
-confirmation/approval lifecycle while Member 1 remains deterministic.
+confirmation/approval lifecycle while Member 1's compatibility and selection
+logic remains deterministic.
 
 ## Requirements interpretation
 
-`StructuredExtractionProvider` is an injected interface with one `extract(request)` operation. No model name or SDK method is hardcoded. `configured_provider()` fails closed until Member 2 supplies a documented provider integration. `FixtureExtractionProvider` and `OFFLINE_EXTRACTION_FIXTURES` are deterministic test-only behavior and make no network request.
+`StructuredExtractionProvider` is an injected interface with one `extract(request)` operation. `GroqStructuredExtractionProvider` uses Groq's documented chat-completions HTTP contract and JSON-object response mode; the model ID is supplied by deployment configuration rather than hardcoded. `configured_provider()` fails closed until both Groq variables are present. `FixtureExtractionProvider` and `OFFLINE_EXTRACTION_FIXTURES` are deterministic test-only behavior and make no network request.
+
+Groq's response is decoded but not trusted. `interpret_requirements()` validates it
+against `ExtractionPayload`, rejects extra fields and request-reference mismatches,
+and returns an unconfirmed draft. Groq cannot confirm requirements, approve a
+plan, select a payment recipient, or change deterministic compatibility outcomes.
 
 Provider output is untrusted. `ExtractionPayload` rejects undeclared fields, validates the `DraftRequirements` schema, checks that the draft request reference matches, separates `explicit_facts` from `suggested_defaults`, and produces clarification questions from explicit missing information. A `RequirementInterpretation` contains only a draft; it cannot contain confirmation or approval state.
 

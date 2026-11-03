@@ -1,216 +1,134 @@
 import type {
-  ApprovalRecord,
-  BundleProposal,
-  ConfirmedRequirements,
-  ExecutionRecord,
-  PresetScenario,
-  ReplanResult,
-  RequirementInterpretation,
+  ApiFailure, ApprovalRecord, AuthoritativePlan, BundleProposal, ConfirmedRequirements,
+  EvidenceRecord, ExecutionRecord, PresetScenario, ReplanResult, RequirementInterpretation,
 } from '../types/bundlegraph';
-import {
-  OFFLINE_PRESETS,
-  SAMPLE_CONFIRMED_REQ,
-  SAMPLE_INTERPRETATION,
-  SAMPLE_PROPOSAL,
-  SAMPLE_REPLAN_RESULT,
-} from '../fixtures/offlineData';
+import { OFFLINE_PRESETS, SAMPLE_CONFIRMED_REQ, SAMPLE_INTERPRETATION, SAMPLE_PROPOSAL, SAMPLE_REPLAN_RESULT } from '../fixtures/offlineData';
+import { clearSession, getAccessToken } from '../auth/session';
 
-const configuredDemoBase = import.meta.env.VITE_BUNDLEGRAPH_DEMO_API_BASE?.trim();
-const DEMO_API_BASE = configuredDemoBase
-  ? configuredDemoBase.replace(/\/$/, '')
-  : null;
+const configuredRuntime = import.meta.env.VITE_BUNDLEGRAPH_RUNTIME?.trim();
+const configuredBase = import.meta.env.VITE_BUNDLEGRAPH_API_BASE?.trim();
+const API_BASE = configuredBase ? configuredBase.replace(/\/$/, '') : '';
+const OBSERVABILITY_ENDPOINT = import.meta.env.VITE_BUNDLEGRAPH_OBSERVABILITY_ENDPOINT?.trim();
 
-export type FrontendRuntimeMode = 'fixture' | 'demo_api';
+export type FrontendRuntimeMode = 'fixture' | 'authoritative';
+export const frontendRuntime = {
+  mode: (configuredRuntime === 'authoritative' ? 'authoritative' : 'fixture') as FrontendRuntimeMode,
+  label: configuredRuntime === 'authoritative' ? 'Authoritative application API' : 'Synthetic offline fixtures',
+  apiBase: configuredRuntime === 'authoritative' ? API_BASE : null,
+};
 
-export const frontendRuntime: {
-  mode: FrontendRuntimeMode;
-  label: string;
-  apiBase: string | null;
-} = DEMO_API_BASE
-  ? {
-      mode: 'demo_api',
-      label: 'Connected demo API',
-      apiBase: DEMO_API_BASE,
-    }
-  : {
-      mode: 'fixture',
-      label: 'Synthetic offline fixtures',
-      apiBase: null,
-    };
-
-function cloneFixture<T>(value: T): T {
-  return structuredClone(value);
+export class ApiError extends Error implements ApiFailure {
+  status: number;
+  reason_code: string;
+  correlation_id?: string;
+  constructor(status: number, reasonCode: string, message: string, correlationId?: string) {
+    super(message);
+    this.status = status;
+    this.reason_code = reasonCode;
+    this.correlation_id = correlationId;
+  }
 }
 
-async function requestDemoApi<T>(endpoint: string, options: RequestInit, fixture: T): Promise<T> {
-  if (!DEMO_API_BASE) return cloneFixture(fixture);
+function cloneFixture<T>(value: T): T { return structuredClone(value); }
+function correlationId(): string { return `web-${crypto.randomUUID()}`; }
 
+function reportFailure(error: ApiError, endpoint: string): void {
+  if (!OBSERVABILITY_ENDPOINT) return;
+  const payload = JSON.stringify({ event: 'api_failure', endpoint, status: error.status, reason_code: error.reason_code, correlation_id: error.correlation_id, occurred_at: new Date().toISOString() });
+  navigator.sendBeacon?.(OBSERVABILITY_ENDPOINT, new Blob([payload], { type: 'application/json' }));
+}
+
+async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const token = getAccessToken();
+  const corr = correlationId();
+  if (!token) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to continue.');
   let response: Response;
   try {
-    response = await fetch(`${DEMO_API_BASE}${endpoint}`, {
-      headers: { 'Content-Type': 'application/json' },
-      ...options,
-    });
-  } catch (error) {
-    throw new Error(
-      `Configured demo API is unavailable for ${endpoint}. Fixture data was not substituted. ${String(error)}`,
-    );
+    response = await fetch(`${API_BASE}${endpoint}`, { ...options, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Correlation-ID': corr, ...options.headers } });
+  } catch {
+    const error = new ApiError(0, 'NETWORK_UNAVAILABLE', 'The BundleGraph service could not be reached.', corr);
+    reportFailure(error, endpoint);
+    throw error;
   }
-
+  const responseCorrelation = response.headers.get('x-correlation-id') || corr;
   if (!response.ok) {
-    throw new Error(`Demo API ${endpoint} returned ${response.status}: ${await response.text()}`);
+    if (response.status === 401) clearSession();
+    let detail: unknown;
+    try { detail = await response.json(); } catch { detail = await response.text(); }
+    const nested = typeof detail === 'object' && detail !== null && 'detail' in detail ? (detail as { detail: unknown }).detail : detail;
+    const reason = typeof nested === 'object' && nested !== null && 'reason_code' in nested
+      ? String((nested as { reason_code: unknown }).reason_code)
+      : response.status === 409 ? 'STALE_RESOURCE_VERSION' : `HTTP_${response.status}`;
+    const message = typeof nested === 'string' ? nested : JSON.stringify(nested);
+    const error = new ApiError(response.status, reason, message || response.statusText, responseCorrelation);
+    reportFailure(error, endpoint);
+    throw error;
   }
   return response.json() as Promise<T>;
 }
 
+function fixtureApproval(planId: string, amountMinor: number, currency: string): ApprovalRecord {
+  return { approval_id: 'fixture-approval-v1', plan_id: planId, plan_version: '1', amount_minor: amountMinor, currency, status: 'SIMULATED_FIXTURE_APPROVAL', created_at: '2026-01-01T00:00:00Z', valid: true };
+}
+
 export const api = {
-  async getPresets(): Promise<PresetScenario[]> {
-    return requestDemoApi('/api/presets', { method: 'GET' }, OFFLINE_PRESETS);
+  async getPresets(): Promise<PresetScenario[]> { return cloneFixture(OFFLINE_PRESETS); },
+
+  async interpretRequirements(message: string, requestReference = `req-${crypto.randomUUID()}`): Promise<RequirementInterpretation> {
+    if (frontendRuntime.mode === 'fixture') return { ...cloneFixture(SAMPLE_INTERPRETATION), draft: { ...cloneFixture(SAMPLE_INTERPRETATION.draft), request_reference: requestReference, use_case: message.slice(0, 80) }, provider_mode: 'synthetic_fixture', version: 1, can_confirm: true };
+    return request('/requirement-drafts/interpret', { method: 'POST', body: JSON.stringify({ message, request_reference: requestReference }) });
   },
 
-  async interpretRequirements(message: string, requestReference?: string): Promise<RequirementInterpretation> {
-    const fixture: RequirementInterpretation = {
-      ...cloneFixture(SAMPLE_INTERPRETATION),
-      draft: {
-        ...cloneFixture(SAMPLE_INTERPRETATION.draft),
-        use_case: message.slice(0, 80),
-      },
-      provider_mode: 'synthetic_fixture',
-    };
-    return requestDemoApi(
-      '/api/requirements/interpret',
-      {
-        method: 'POST',
-        body: JSON.stringify({ message, request_reference: requestReference }),
-      },
-      fixture,
-    );
+  async saveGuidedDraft(params: { request_reference: string; use_case: string; participants: number; budget_minor: number; currency: string; laptop_connectors: string[]; monitoring: string; deadline?: string }): Promise<{ draft: RequirementInterpretation['draft']; version: number; clarification_questions: string[]; can_confirm: boolean }> {
+    if (frontendRuntime.mode === 'fixture') return { draft: cloneFixture(SAMPLE_INTERPRETATION.draft), version: 1, clarification_questions: [], can_confirm: true };
+    return request('/requirement-drafts/guided', { method: 'POST', body: JSON.stringify(params) });
   },
 
-  async confirmRequirements(params: {
-    use_case: string;
-    participants: number;
-    budget_minor: number;
-    currency: string;
-    laptop_connector: string;
-    listening_requirement: string;
-    deadline?: string;
-  }): Promise<ConfirmedRequirements> {
-    const fixture: ConfirmedRequirements = {
-      ...cloneFixture(SAMPLE_CONFIRMED_REQ),
-      use_case: params.use_case,
-      participants: params.participants,
-      budget: { amount_minor: params.budget_minor, currency: params.currency },
-      laptop_connectors: [{ connector: params.laptop_connector }],
-      listening_requirement: params.listening_requirement,
-      deadline: params.deadline || null,
-    };
-    return requestDemoApi(
-      '/api/requirements/confirm',
-      { method: 'POST', body: JSON.stringify(params) },
-      fixture,
-    );
+  async confirmDraft(requestReference: string, expectedVersion: number): Promise<ConfirmedRequirements> {
+    if (frontendRuntime.mode === 'fixture') return cloneFixture(SAMPLE_CONFIRMED_REQ);
+    const response = await request<{ confirmation_reference: string; requirements: ConfirmedRequirements }>(`/requirement-drafts/${encodeURIComponent(requestReference)}/confirm`, { method: 'POST', body: JSON.stringify({ expected_version: expectedVersion }) });
+    return response.requirements;
   },
 
-  async generateBundlePlans(requirements: ConfirmedRequirements): Promise<{
-    status: string;
-    reason_codes: string[];
-    result: {
-      proposals: BundleProposal[];
-      search_status: string;
-      infeasibility?: { reason_codes: string[] };
-    };
-  }> {
-    const fixture = {
-      status: 'ok',
-      reason_codes: [] as string[],
-      result: {
-        proposals: [cloneFixture(SAMPLE_PROPOSAL)],
-        search_status: 'fixture_completed',
-      },
-    };
-    return requestDemoApi(
-      '/api/bundle-plans/generate',
-      { method: 'POST', body: JSON.stringify({ requirements }) },
-      fixture,
-    );
+  async generateBundlePlans(requirements: ConfirmedRequirements): Promise<{ status: string; reason_codes: string[]; result: { proposals: BundleProposal[]; search_status: string; evaluated_candidates?: number; infeasibility?: { reason_codes: string[] } | null } }> {
+    if (frontendRuntime.mode === 'fixture') return { status: 'ok', reason_codes: [], result: { proposals: [cloneFixture(SAMPLE_PROPOSAL)], search_status: 'fixture_completed', evaluated_candidates: 1 } };
+    return request('/bundle-plans/generate', { method: 'POST', body: JSON.stringify({ schema_version: '1.0', correlation_id: correlationId(), confirmation_reference: requirements.confirmation_reference }) });
   },
 
-  async replanBundle(params: {
-    original_proposal: BundleProposal;
-    requirements: ConfirmedRequirements;
-    failed_offer_ids: string[];
-    locked_offer_ids: string[];
-    plan_id: string;
-    plan_version: string;
-  }): Promise<ReplanResult> {
-    return requestDemoApi(
-      '/api/bundle-plans/replan',
-      { method: 'POST', body: JSON.stringify(params) },
-      SAMPLE_REPLAN_RESULT,
-    );
+  async persistPlan(requirements: ConfirmedRequirements, proposalKey: string): Promise<AuthoritativePlan> {
+    if (frontendRuntime.mode === 'fixture') {
+      const total = SAMPLE_PROPOSAL.cost_breakdown.all_in_total || SAMPLE_PROPOSAL.cost_breakdown.merchandise_subtotal;
+      return { plan_id: SAMPLE_PROPOSAL.proposal_key, status: 'awaiting_approval', current_version: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), versions: [{ plan_id: SAMPLE_PROPOSAL.proposal_key, version: 1, fingerprint: 'fixture-fingerprint-v1', created_at: new Date().toISOString(), confirmation_reference: requirements.confirmation_reference, correlation_id: 'fixture-correlation', line_items: [], total, merchant_allocations: [], payload: {} }] };
+    }
+    const response = await request<{ plan: AuthoritativePlan }>('/plans', { method: 'POST', body: JSON.stringify({ schema_version: '1.0', correlation_id: correlationId(), confirmation_reference: requirements.confirmation_reference, proposal_key: proposalKey }) });
+    return response.plan;
   },
 
-  async createApproval(params: {
-    plan_id: string;
-    plan_version: string;
-    amount_minor: number;
-    currency: string;
-  }): Promise<ApprovalRecord> {
-    const fixture: ApprovalRecord = {
-      approval_id: 'fixture-approval-v1',
-      plan_id: params.plan_id,
-      plan_version: params.plan_version,
-      amount_minor: params.amount_minor,
-      currency: params.currency,
-      status: 'SIMULATED_FIXTURE_APPROVAL',
-      created_at: '2026-01-01T00:00:00Z',
-      valid: true,
-    };
-    return requestDemoApi(
-      '/api/approvals/create',
-      { method: 'POST', body: JSON.stringify(params) },
-      fixture,
-    );
+  async getPlanEvidence(planId: string): Promise<EvidenceRecord[]> {
+    if (frontendRuntime.mode === 'fixture') return [];
+    const response = await request<{ evidence: EvidenceRecord[] }>(`/bundle-plans/${encodeURIComponent(planId)}/evidence?correlation_id=${encodeURIComponent(correlationId())}`);
+    return response.evidence;
   },
 
-  async simulateExecution(params: {
-    approval_id: string;
-    plan_id: string;
-    plan_version: string;
-    amount_minor: number;
-    currency: string;
-    inject_failure_offer_id?: string;
-  }): Promise<ExecutionRecord> {
-    const fixture: ExecutionRecord = params.inject_failure_offer_id
-      ? {
-          execution_status: 'FAILED_MERCHANT_STOCK_OUTAGE',
-          plan_id: params.plan_id,
-          approval_id: params.approval_id,
-          approval_invalidated: true,
-          failed_offer_id: params.inject_failure_offer_id,
-          message: `Synthetic stock outage for ${params.inject_failure_offer_id}. No transaction was attempted.`,
-          replan_recommended: true,
-        }
-      : {
-          execution_status: 'COMPLETED',
-          transaction_id: 'fixture-transaction-v1',
-          plan_id: params.plan_id,
-          amount_minor: params.amount_minor,
-          currency: params.currency,
-          settled_at: '2026-01-01T00:00:00Z',
-          approval_id: params.approval_id,
-          message: 'Synthetic fixture execution completed. No payment provider was called.',
-        };
-    return requestDemoApi(
-      '/api/executions/simulate',
-      { method: 'POST', body: JSON.stringify(params) },
-      fixture,
-    );
+  async createApproval(plan: AuthoritativePlan): Promise<ApprovalRecord> {
+    const head = plan.versions.find((version) => version.version === plan.current_version);
+    if (!head) throw new ApiError(409, 'PLAN_VERSION_MISSING', 'The selected plan version is unavailable.');
+    if (frontendRuntime.mode === 'fixture') return fixtureApproval(plan.plan_id, head.total.amount_minor, head.total.currency);
+    const response = await request<{ approval: { approval_id: string; plan_id: string; plan_version: number; plan_fingerprint: string; status: string; granted_at?: string; permitted_total: { amount_minor: number; currency: string } } }>('/approvals', { method: 'POST', body: JSON.stringify({ plan_id: plan.plan_id, plan_version: head.version, plan_fingerprint: head.fingerprint, permitted_total: head.total }) });
+    return { approval_id: response.approval.approval_id, plan_id: response.approval.plan_id, plan_version: String(response.approval.plan_version), plan_fingerprint: response.approval.plan_fingerprint, amount_minor: response.approval.permitted_total.amount_minor, currency: response.approval.permitted_total.currency, status: response.approval.status, created_at: response.approval.granted_at || new Date().toISOString(), valid: response.approval.status === 'granted' };
   },
 
-  async resetDemo(): Promise<void> {
-    if (!DEMO_API_BASE) return;
-    await requestDemoApi('/api/demo/reset', { method: 'POST' }, { status: 'fixture_reset' });
+  async replanBundle(plan: AuthoritativePlan, failedOfferId: string): Promise<ReplanResult> {
+    if (frontendRuntime.mode === 'fixture') return cloneFixture(SAMPLE_REPLAN_RESULT);
+    return request(`/plans/${encodeURIComponent(plan.plan_id)}/replan-proposals`, { method: 'POST', body: JSON.stringify({ expected_plan_version: plan.current_version, failed_offer_ids: [failedOfferId] }) });
   },
+
+  async simulateExecution(params: { approval_id: string; plan_id: string; plan_version: string; amount_minor: number; currency: string; inject_failure_offer_id?: string }): Promise<ExecutionRecord> {
+    if (frontendRuntime.mode !== 'fixture') throw new ApiError(409, 'PAYMENT_EXECUTION_NOT_ENABLED', 'Payment execution is not enabled in the application runtime.');
+    return params.inject_failure_offer_id
+      ? { execution_status: 'FAILED_MERCHANT_STOCK_OUTAGE', plan_id: params.plan_id, approval_id: params.approval_id, approval_invalidated: true, failed_offer_id: params.inject_failure_offer_id, message: `Synthetic stock outage for ${params.inject_failure_offer_id}. No transaction was attempted.`, replan_recommended: true }
+      : { execution_status: 'COMPLETED', transaction_id: 'fixture-transaction-v1', plan_id: params.plan_id, amount_minor: params.amount_minor, currency: params.currency, settled_at: '2026-01-01T00:00:00Z', approval_id: params.approval_id, message: 'Synthetic fixture execution completed. No payment provider was called.' };
+  },
+
+  async resetDemo(): Promise<void> { return; },
 };

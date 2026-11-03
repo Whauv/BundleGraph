@@ -1,43 +1,95 @@
 import React from 'react';
 import { useDemo } from '../../store/demoStore';
-import { Layers, RotateCcw, SlidersHorizontal, User, ShieldCheck } from 'lucide-react';
+import { Layers, LogOut, RotateCcw, SlidersHorizontal, User } from 'lucide-react';
+import { clearSession } from '../../auth/session';
 
 export const Header: React.FC = () => {
-  const { presets, activePresetId, loadPreset, resetAll, isLoading, runtimeMode } = useDemo();
+  const { presets, activePresetId, loadPreset, resetAll, isLoading, runtimeMode, runtimeLabel } = useDemo();
 
   return (
-    <header className="main-header">
-      {/* Top Brand & Status Tier */}
-      <div className="header-top">
+    <header className="main-header" style={{ padding: 0, gap: 0, borderBottom: 'none' }}>
+      {/* Top Brand Tier */}
+      <div
+        className="header-top"
+        style={{
+          height: '56px',
+          padding: '0 1.25rem',
+          borderBottom: '1px solid #222222',
+          backgroundColor: '#000000',
+        }}
+      >
         <div className="brand-section">
-          <div className="brand-logo-badge" title="BundleGraph Engine">
-            <Layers size={16} />
+          <div className="brand-logo-badge" style={{ background: '#111111', borderColor: '#2a2a2a', color: '#ffffff' }} title="BundleGraph Engine">
+            <Layers size={15} />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span className="brand-title">BundleGraph</span>
-            <span className="badge badge-neutral">v1.0-RC</span>
+            <span style={{ fontSize: '1.0625rem', fontWeight: 700, letterSpacing: '-0.02em', color: '#ffffff' }}>
+              BundleGraph
+            </span>
+            <span
+              style={{
+                padding: '0.1rem 0.4rem',
+                borderRadius: '2px',
+                backgroundColor: '#111111',
+                border: '1px solid #2a2a2a',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.6875rem',
+                color: '#ffffff',
+                fontWeight: 600,
+              }}
+            >
+              v1.0-RC
+            </span>
           </div>
-          <span className="brand-subtitle">
-            Deterministic Hardware Graph &amp; Settlement Verification
+          <span className="brand-subtitle" style={{ color: '#888888', borderColor: '#222222', fontSize: '0.75rem', fontFamily: 'var(--font-mono)' }}>
+            Evidence-Backed Hardware Graph &amp; PayPal Settlement Engine
           </span>
         </div>
 
-        <div className="header-badges">
-          <div className="badge badge-emerald">
+        <div className="header-badges" style={{ gap: '0.75rem' }}>
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              padding: '0.25rem 0.6rem',
+              borderRadius: '2px',
+              backgroundColor: '#051108',
+              border: '1px solid rgba(0, 229, 117, 0.4)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.6875rem',
+              color: '#00e575',
+              fontWeight: 600,
+            }}
+          >
             <span
               style={{
                 width: '6px',
                 height: '6px',
                 borderRadius: '50%',
-                backgroundColor: 'var(--status-emerald)',
+                backgroundColor: '#00e575',
                 display: 'inline-block',
+                boxShadow: '0 0 8px #00e575',
               }}
             />
-            <span>PayPal Sandbox v2: Active</span>
+            <span>{runtimeLabel}</span>
           </div>
 
-          <div className="badge badge-neutral">
-            <span>Curated SKUs: <strong style={{ color: 'var(--text-primary)' }}>24 Items</strong></span>
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              padding: '0.25rem 0.6rem',
+              borderRadius: '2px',
+              backgroundColor: '#0a0a0a',
+              border: '1px solid #222222',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.6875rem',
+              color: '#888888',
+            }}
+          >
+            <span>{runtimeMode === 'fixture' ? <>Curated Fixtures: <strong style={{ color: '#ffffff' }}>24 SKUs</strong></> : 'Server catalog'}</span>
           </div>
 
           <button
@@ -47,35 +99,40 @@ export const Header: React.FC = () => {
             disabled={isLoading}
             title="Reset application state, clear cache and logs"
           >
-            <RotateCcw size={13} />
+            <RotateCcw size={12} />
             <span>Reset Session</span>
           </button>
 
+          {runtimeMode === 'authoritative' && (
+            <button type="button" className="reset-btn" onClick={clearSession} title="End the protected browser session">
+              <LogOut size={12} />
+              <span>Sign out</span>
+            </button>
+          )}
+
           <div
             style={{
-              width: '30px',
-              height: '30px',
-              borderRadius: 'var(--radius-sm)',
-              backgroundColor: 'var(--bg-card)',
-              border: '1px solid var(--border-default)',
-              color: 'var(--text-secondary)',
+              width: '28px',
+              height: '28px',
+              borderRadius: '2px',
+              backgroundColor: '#ffffff',
+              color: '#000000',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
             }}
-            title="Operator Session"
           >
             <User size={15} />
           </div>
         </div>
       </div>
 
-      {/* Scenario Evaluation Bar */}
+      {/* Evaluation Scenarios Bar */}
       <div className="preset-bar">
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <div className="preset-title-group">
-            <SlidersHorizontal size={13} style={{ color: 'var(--text-muted)' }} />
-            <span>Test Scenarios:</span>
+          <div className="preset-title-group" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <SlidersHorizontal size={12} style={{ color: '#666666' }} />
+            <span>Scenarios:</span>
           </div>
           <div className="preset-buttons" role="group" aria-label="Evaluation test presets">
             {presets.map((p) => {
@@ -88,7 +145,6 @@ export const Header: React.FC = () => {
                   onClick={() => loadPreset(p)}
                   disabled={isLoading}
                   aria-pressed={isActive}
-                  title={`Load scenario: ${p.description || p.name}`}
                 >
                   <span>{p.name}</span>
                 </button>
@@ -97,16 +153,12 @@ export const Header: React.FC = () => {
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', color: '#666666' }}>
           <span>
             Runtime:{' '}
-            <strong style={{ color: runtimeMode === 'fixture' ? 'var(--status-amber)' : 'var(--status-emerald)' }}>
-              {runtimeMode === 'fixture' ? 'FIXTURE_ONLY' : 'DEMO_API_CONNECTED'}
+            <strong style={{ color: runtimeMode === 'fixture' ? '#fabc45' : '#00e575' }}>
+              {runtimeMode === 'fixture' ? 'FIXTURE_ONLY' : 'AUTHORITATIVE_API'}
             </strong>
-          </span>
-          <span style={{ borderLeft: '1px solid var(--border-default)', paddingLeft: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <ShieldCheck size={14} style={{ color: 'var(--status-emerald)' }} />
-            <span>Solver: <strong style={{ color: 'var(--status-emerald)' }}>DETERMINISTIC_PASS</strong></span>
           </span>
         </div>
       </div>

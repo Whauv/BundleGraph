@@ -1,9 +1,13 @@
 import React, { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import type {
+  ApiFailure,
   ApprovalRecord,
+  AuthoritativePlan,
   BundleProposal,
   ConfirmedRequirements,
+  EvidenceRecord,
   ExecutionRecord,
+  PipelineStage,
   PresetScenario,
   ReplanResult,
   RequirementInterpretation,
@@ -39,6 +43,10 @@ interface DemoContextType {
   approvalRecord: ApprovalRecord | null;
   executionRecord: ExecutionRecord | null;
   replanResult: ReplanResult | null;
+  authoritativePlan: AuthoritativePlan | null;
+  evidenceRecords: EvidenceRecord[];
+  pipelineStage: PipelineStage;
+  apiFailure: ApiFailure | null;
   
   isLoading: boolean;
   errorMessage: string | null;
@@ -47,38 +55,64 @@ interface DemoContextType {
   confirmRequirements: () => Promise<void>;
   generateBundles: () => Promise<void>;
   setSelectedProposal: (prop: BundleProposal) => void;
+  preparePlan: () => Promise<void>;
   approvePlan: () => Promise<void>;
   executeOrder: (injectFailureOfferId?: string) => Promise<void>;
   triggerReplan: (failedOfferId?: string) => Promise<void>;
   resetAll: () => Promise<void>;
+  retryLastAction: () => Promise<void>;
 }
 
 const DemoContext = createContext<DemoContextType | null>(null);
 
+interface SavedWorkflow {
+  promptText?: string;
+  budgetDollars?: number;
+  participants?: number;
+  laptopConnector?: string;
+  listeningRequirement?: string;
+  deadlineDate?: string;
+  requestReference?: string;
+}
+
+function savedWorkflow(): SavedWorkflow {
+  try { return JSON.parse(sessionStorage.getItem('bundlegraph.workflow') || '{}') as SavedWorkflow; }
+  catch { sessionStorage.removeItem('bundlegraph.workflow'); return {}; }
+}
+
 export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [currentStep, setStep] = useState<ScreenStep>('builder');
-  const [promptText, setPromptText] = useState(
-    'I want to start a 2-person podcast with my USB-C laptop. Budget is $600. We need 2 microphones, headphones, and all necessary cables.',
-  );
-  const [budgetDollars, setBudgetDollars] = useState(600);
-  const [participants, setParticipants] = useState(2);
-  const [laptopConnector, setLaptopConnector] = useState('usb-c');
-  const [listeningRequirement, setListeningRequirement] = useState('independent_headphones');
+  const [restoredWorkflow] = useState(savedWorkflow);
+  const [currentStep, setStep] = useState<ScreenStep>(() => {
+    const candidate = window.location.hash.replace('#/', '') as ScreenStep;
+    return ['builder', 'review', 'comparison', 'approval', 'execution'].includes(candidate) ? candidate : 'builder';
+  });
+  const [promptText, setPromptText] = useState(restoredWorkflow.promptText || 'I want to start a 2-person podcast with my USB-C laptop. Budget is $600. We need 2 microphones, headphones, and all necessary cables.');
+  const [budgetDollars, setBudgetDollars] = useState(restoredWorkflow.budgetDollars || 600);
+  const [participants, setParticipants] = useState(restoredWorkflow.participants || 2);
+  const [laptopConnector, setLaptopConnector] = useState(restoredWorkflow.laptopConnector || 'usb-c');
+  const [listeningRequirement, setListeningRequirement] = useState(restoredWorkflow.listeningRequirement || 'independent_headphones');
   const [deadlineDate, setDeadlineDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 7);
-    return d.toISOString().split('T')[0];
+    return restoredWorkflow.deadlineDate || d.toISOString().split('T')[0];
   });
 
   const [presets, setPresets] = useState<PresetScenario[]>(OFFLINE_PRESETS);
   const [activePresetId, setActivePresetId] = useState<string | null>('preset-standard-podcast');
   const [interpretation, setInterpretation] = useState<RequirementInterpretation | null>(null);
-  const [confirmedRequirements, setConfirmedRequirements] = useState<ConfirmedRequirements | null>(SAMPLE_CONFIRMED_REQ);
-  const [proposals, setProposals] = useState<BundleProposal[]>([SAMPLE_PROPOSAL]);
-  const [selectedProposal, setSelectedProposal] = useState<BundleProposal | null>(SAMPLE_PROPOSAL);
+  const fixtureMode = frontendRuntime.mode === 'fixture';
+  const [confirmedRequirements, setConfirmedRequirements] = useState<ConfirmedRequirements | null>(fixtureMode ? SAMPLE_CONFIRMED_REQ : null);
+  const [proposals, setProposals] = useState<BundleProposal[]>(fixtureMode ? [SAMPLE_PROPOSAL] : []);
+  const [selectedProposal, setSelectedProposal] = useState<BundleProposal | null>(fixtureMode ? SAMPLE_PROPOSAL : null);
   const [approvalRecord, setApprovalRecord] = useState<ApprovalRecord | null>(null);
   const [executionRecord, setExecutionRecord] = useState<ExecutionRecord | null>(null);
   const [replanResult, setReplanResult] = useState<ReplanResult | null>(null);
+  const [authoritativePlan, setAuthoritativePlan] = useState<AuthoritativePlan | null>(null);
+  const [evidenceRecords, setEvidenceRecords] = useState<EvidenceRecord[]>([]);
+  const [pipelineStage, setPipelineStage] = useState<PipelineStage>('idle');
+  const [apiFailure, setApiFailure] = useState<ApiFailure | null>(null);
+  const [draftVersion, setDraftVersion] = useState<number | null>(null);
+  const [requestReference] = useState(() => restoredWorkflow.requestReference || `req-${crypto.randomUUID()}`);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -87,6 +121,32 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (data && data.length) setPresets(data);
     }).catch(console.warn);
   }, []);
+
+  useEffect(() => {
+    window.history.replaceState({}, '', `#/${currentStep}`);
+    sessionStorage.setItem('bundlegraph.workflow', JSON.stringify({ promptText, budgetDollars, participants, laptopConnector, listeningRequirement, deadlineDate, requestReference }));
+  }, [currentStep, promptText, budgetDollars, participants, laptopConnector, listeningRequirement, deadlineDate, requestReference]);
+
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (currentStep !== 'builder' && !approvalRecord) event.preventDefault();
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [currentStep, approvalRecord]);
+
+  const captureError = (err: unknown) => {
+    const failure = err && typeof err === 'object' && 'reason_code' in err
+      ? err as ApiFailure
+      : { status: 0, reason_code: 'UNEXPECTED_CLIENT_ERROR', message: String(err) };
+    setApiFailure(failure);
+    setErrorMessage(`${failure.reason_code}: ${failure.message}`);
+  };
+
+  const invalidatePlanState = () => {
+    setConfirmedRequirements(null); setProposals([]); setSelectedProposal(null); setAuthoritativePlan(null);
+    setEvidenceRecords([]); setApprovalRecord(null); setExecutionRecord(null); setReplanResult(null);
+  };
 
   const loadPreset = async (preset: PresetScenario) => {
     setActivePresetId(preset.id);
@@ -98,6 +158,9 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setApprovalRecord(null);
     setExecutionRecord(null);
     setReplanResult(null);
+    setAuthoritativePlan(null);
+    setEvidenceRecords([]);
+    setApiFailure(null);
     setErrorMessage(null);
 
     // If it's the trap preset, immediately prepare the review step
@@ -108,7 +171,7 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setInterpretation(interp);
         setStep('builder');
       } catch (err: unknown) {
-        setErrorMessage(String(err));
+        captureError(err);
       } finally {
         setIsLoading(false);
       }
@@ -121,12 +184,23 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const interp = await api.interpretRequirements(promptText);
+      invalidatePlanState();
+      setPipelineStage('resolving_requirements');
+      let interp: RequirementInterpretation;
+      if (frontendRuntime.mode === 'authoritative') {
+        const result = await api.saveGuidedDraft({ request_reference: requestReference, use_case: promptText, participants, budget_minor: Math.round(budgetDollars * 100), currency: 'USD', laptop_connectors: [laptopConnector], monitoring: listeningRequirement, deadline: new Date(deadlineDate).toISOString() });
+        setDraftVersion(result.version);
+        interp = { draft: result.draft, explicit_facts: [], suggested_defaults: [], missing_information: result.draft.missing_information, clarification_questions: result.clarification_questions, provider_mode: 'authoritative_guided', version: result.version, can_confirm: result.can_confirm };
+      } else {
+        interp = await api.interpretRequirements(promptText, requestReference);
+        setDraftVersion(interp.version || 1);
+      }
       setInterpretation(interp);
       setStep('review');
     } catch (err: unknown) {
-      setErrorMessage(String(err));
+      captureError(err);
     } finally {
+      setPipelineStage('idle');
       setIsLoading(false);
     }
   };
@@ -135,19 +209,18 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const confirmed = await api.confirmRequirements({
-        use_case: `${participants}-person podcast`,
-        participants,
-        budget_minor: Math.round(budgetDollars * 100),
-        currency: 'USD',
-        laptop_connector: laptopConnector,
-        listening_requirement: listeningRequirement,
-        deadline: new Date(deadlineDate).toISOString(),
-      });
+      setPipelineStage('resolving_requirements');
+      let version = draftVersion;
+      if (frontendRuntime.mode === 'authoritative') {
+        const updated = await api.saveGuidedDraft({ request_reference: requestReference, use_case: promptText, participants, budget_minor: Math.round(budgetDollars * 100), currency: 'USD', laptop_connectors: [laptopConnector], monitoring: listeningRequirement, deadline: new Date(deadlineDate).toISOString() });
+        version = updated.version;
+        setDraftVersion(version);
+      }
+      const confirmed = await api.confirmDraft(requestReference, version || 1);
       setConfirmedRequirements(confirmed);
       await generateBundlesWithReq(confirmed);
     } catch (err: unknown) {
-      setErrorMessage(String(err));
+      captureError(err);
       setIsLoading(false);
     }
   };
@@ -156,6 +229,13 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setIsLoading(true);
     setErrorMessage(null);
     try {
+      setPipelineStage('discovering_candidates');
+      await Promise.resolve();
+      setPipelineStage('checking_evidence');
+      await Promise.resolve();
+      setPipelineStage('evaluating_compatibility');
+      await Promise.resolve();
+      setPipelineStage('selecting_bundles');
       const res = await api.generateBundlePlans(req);
       if (res.status === 'ok' && res.result.proposals.length > 0) {
         setProposals(res.result.proposals);
@@ -169,8 +249,9 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
       setStep('comparison');
     } catch (err: unknown) {
-      setErrorMessage(String(err));
+      captureError(err);
     } finally {
+      setPipelineStage('complete');
       setIsLoading(false);
     }
   };
@@ -180,21 +261,34 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     await generateBundlesWithReq(confirmedRequirements);
   };
 
-  const approvePlan = async () => {
-    if (!selectedProposal) return;
+  const preparePlan = async () => {
+    if (!selectedProposal || !confirmedRequirements) return;
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const appr = await api.createApproval({
-        plan_id: selectedProposal.proposal_key,
-        plan_version: '1.0',
-        amount_minor: selectedProposal.cost_breakdown.all_in_total?.amount_minor || 44300,
-        currency: selectedProposal.cost_breakdown.currency || 'USD',
-      });
-      setApprovalRecord(appr);
+      setPipelineStage('persisting_plan');
+      const plan = await api.persistPlan(confirmedRequirements, selectedProposal.proposal_key);
+      setAuthoritativePlan(plan);
+      const evidence = await api.getPlanEvidence(plan.plan_id);
+      setEvidenceRecords(evidence);
       setStep('approval');
     } catch (err: unknown) {
-      setErrorMessage(String(err));
+      captureError(err);
+    } finally {
+      setPipelineStage('complete');
+      setIsLoading(false);
+    }
+  };
+
+  const approvePlan = async () => {
+    if (!authoritativePlan) return;
+    setIsLoading(true);
+    setErrorMessage(null);
+    try {
+      const appr = await api.createApproval(authoritativePlan);
+      setApprovalRecord(appr);
+    } catch (err: unknown) {
+      captureError(err);
     } finally {
       setIsLoading(false);
     }
@@ -219,36 +313,26 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         await triggerReplan(injectFailureOfferId);
       }
     } catch (err: unknown) {
-      setErrorMessage(String(err));
+      captureError(err);
     } finally {
       setIsLoading(false);
     }
   };
 
   const triggerReplan = async (failedOfferId?: string) => {
-    if (!selectedProposal || !confirmedRequirements) return;
+    if (!selectedProposal || !confirmedRequirements || !authoritativePlan) return;
     const targetFailed = failedOfferId || 'offer-mic-alpha';
     setIsLoading(true);
     try {
-      const locked = selectedProposal.line_items
-        .map((l) => l.offer_id)
-        .filter((id) => id !== targetFailed);
-
-      const replan = await api.replanBundle({
-        original_proposal: selectedProposal,
-        requirements: confirmedRequirements,
-        failed_offer_ids: [targetFailed],
-        locked_offer_ids: locked,
-        plan_id: selectedProposal.proposal_key,
-        plan_version: '1.0',
-      });
+      const replan = await api.replanBundle(authoritativePlan, targetFailed);
       setReplanResult(replan);
+      setStep('execution');
       // Invalidate the old approval
       if (approvalRecord) {
         setApprovalRecord({ ...approvalRecord, valid: false, status: 'INVALIDATED_PLAN_MODIFIED' });
       }
     } catch (err: unknown) {
-      setErrorMessage(`Re-planning error: ${err}`);
+      captureError(err);
     } finally {
       setIsLoading(false);
     }
@@ -266,18 +350,31 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setLaptopConnector('usb-c');
       setListeningRequirement('independent_headphones');
       setInterpretation(null);
-      setConfirmedRequirements(SAMPLE_CONFIRMED_REQ);
-      setProposals([SAMPLE_PROPOSAL]);
-      setSelectedProposal(SAMPLE_PROPOSAL);
+      setConfirmedRequirements(fixtureMode ? SAMPLE_CONFIRMED_REQ : null);
+      setProposals(fixtureMode ? [SAMPLE_PROPOSAL] : []);
+      setSelectedProposal(fixtureMode ? SAMPLE_PROPOSAL : null);
       setApprovalRecord(null);
       setExecutionRecord(null);
       setReplanResult(null);
+      setAuthoritativePlan(null);
+      setEvidenceRecords([]);
+      setPipelineStage('idle');
+      setApiFailure(null);
       setErrorMessage(null);
     } catch (err: unknown) {
-      setErrorMessage(String(err));
+      captureError(err);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const retryLastAction = async () => {
+    setApiFailure(null);
+    setErrorMessage(null);
+    if (currentStep === 'builder' || currentStep === 'review') return interpretPrompt();
+    if (currentStep === 'comparison') return generateBundles();
+    if (currentStep === 'approval' && selectedProposal) return authoritativePlan ? approvePlan() : preparePlan();
+    if (currentStep === 'execution' && executionRecord?.failed_offer_id) return triggerReplan(executionRecord.failed_offer_id);
   };
 
   return (
@@ -288,17 +385,17 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         currentStep,
         setStep,
         promptText,
-        setPromptText,
+        setPromptText: (value) => { setPromptText(value); invalidatePlanState(); },
         budgetDollars,
-        setBudgetDollars,
+        setBudgetDollars: (value) => { setBudgetDollars(value); invalidatePlanState(); },
         participants,
-        setParticipants,
+        setParticipants: (value) => { setParticipants(value); invalidatePlanState(); },
         laptopConnector,
-        setLaptopConnector,
+        setLaptopConnector: (value) => { setLaptopConnector(value); invalidatePlanState(); },
         listeningRequirement,
-        setListeningRequirement,
+        setListeningRequirement: (value) => { setListeningRequirement(value); invalidatePlanState(); },
         deadlineDate,
-        setDeadlineDate,
+        setDeadlineDate: (value) => { setDeadlineDate(value); invalidatePlanState(); },
         presets,
         activePresetId,
         interpretation,
@@ -308,6 +405,10 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         approvalRecord,
         executionRecord,
         replanResult,
+        authoritativePlan,
+        evidenceRecords,
+        pipelineStage,
+        apiFailure,
         isLoading,
         errorMessage,
         loadPreset,
@@ -315,10 +416,12 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         confirmRequirements,
         generateBundles,
         setSelectedProposal,
+        preparePlan,
         approvePlan,
         executeOrder,
         triggerReplan,
         resetAll,
+        retryLastAction,
       }}
     >
       {children}

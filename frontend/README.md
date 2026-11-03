@@ -1,57 +1,52 @@
 # BundleGraph frontend
 
-This directory contains the single BundleGraph frontend: a React 19, TypeScript,
-and Vite application. The earlier dependency-free prototype has been retired so
-there is one entry point, one state model, one API adapter, and one build.
+This is the repository's single React 19, TypeScript, and Vite frontend. It has
+one state model and one API adapter with explicit fixture and authoritative modes.
 
-## Run locally
+## Fixture mode
 
 ```powershell
 npm --prefix frontend ci
 npm --prefix frontend run dev
 ```
 
-Open `http://127.0.0.1:5173`. With no environment configuration the application
-runs in visibly labeled synthetic fixture mode. Fixture approval, execution, and
-recovery records are demonstrations only; they do not call a provider.
+Open `http://127.0.0.1:5173`. Fixture approvals, execution records, and recovery
+records are visibly simulated and make no provider or payment calls.
 
-To connect the optional, non-authoritative demo API in `bundlegraph_api`, copy
-`frontend/.env.example` to `frontend/.env.local` and set:
+## Authoritative application mode
+
+Copy `frontend/.env.example` to `frontend/.env.local` and set:
 
 ```dotenv
-VITE_BUNDLEGRAPH_DEMO_API_BASE=http://127.0.0.1:8000
+VITE_BUNDLEGRAPH_RUNTIME=authoritative
+VITE_BUNDLEGRAPH_API_BASE=http://127.0.0.1:8080
 ```
 
-Then start that API separately:
+The sign-in gate accepts the local application token when OIDC is not configured.
+For a deployed identity provider, configure its public authorization and token
+endpoints, public SPA client ID, scopes, and registered redirect URI. The browser
+uses Authorization Code with PKCE and keeps the access token in `sessionStorage`.
+The backend validates it through RFC 7662 introspection. Client secrets remain
+server-side and must never use a `VITE_` variable.
 
-```powershell
-python -m uvicorn bundlegraph_api.app:app --port 8000
-```
+The authoritative journey is draft → clarification/review → confirmation →
+proposal generation → persisted plan/evidence → exact-version approval → replan.
+Application mode deliberately does not execute payments.
 
-If a configured API cannot be reached, the frontend reports an error. It does
-not silently display fixture success as if it came from the API.
-
-## Checks and production build
+## Checks
 
 ```powershell
 npm --prefix frontend run check
-npm --prefix frontend run build
-npm --prefix frontend run preview
+npx --prefix frontend playwright install chromium
+npm --prefix frontend run test:e2e
 ```
 
-The production artifact is written to `frontend/dist/`. Deploy that directory
-behind the same origin as the authoritative API when the Member 2 confirmation,
-plan, evidence, and approval bridge is connected.
+The build artifact is `frontend/dist/`. Deploy it on the same origin as FastAPI
+where possible. See [INTEGRATION.md](INTEGRATION.md).
 
-## Boundaries
+## Safety boundaries
 
-- The browser never decides compatibility, authoritative confirmation, payment
-  recipients, or payment outcomes.
-- Synthetic fixtures remain labeled and are not substituted after a configured
-  backend failure.
-- Unknown costs, evidence, and delivery feasibility remain unknown.
-- Browser variables beginning with `VITE_` are public configuration, never
-  credentials.
-- PayPal, provider, database, and authentication secrets remain server-side.
-
-See [INTEGRATION.md](INTEGRATION.md) for the API and release boundary.
+- The browser never decides compatibility, confirmation, recipients, or payment outcomes.
+- Authoritative failures never fall back to fixture success.
+- Unknown costs, evidence, recovery values, and delivery feasibility stay unknown.
+- Only redacted status, reason code, route, correlation ID, and timestamp may be sent to the optional observability endpoint.

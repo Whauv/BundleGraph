@@ -25,7 +25,7 @@ from bundlegraph.service import (
 from bundlegraph.replanning import ExecutionFact, LockedComponent, ReplanRequest, ReplacementBundleProposal, replan_bundle
 from bundlegraph.selection import BundleProposal, BundleSelectionRequest, SolverLimits, select_bundles
 from bundlegraph.catalog import OFFLINE_FIXTURE_CATALOG
-from bundlegraph.interpretation import InterpretationRequest, StructuredExtractionProvider, clarification_questions, interpret_requirements
+from bundlegraph.interpretation import ExtractionValidationError, GroqProviderError, InterpretationRequest, StructuredExtractionProvider, clarification_questions, interpret_requirements
 from bundlegraph.models import ConfirmedRequirements, DraftRequirements, ProductCategory
 
 from .application import (
@@ -313,7 +313,12 @@ def build_app(
     def interpret_requirement_draft(body: InterpretDraftBody, identity: Identity = Depends(require_identity)) -> dict[str, Any]:
         if extraction_provider is None:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "structured extraction provider is not configured")
-        result = interpret_requirements(InterpretationRequest(request_reference=body.request_reference, message=body.message), extraction_provider)
+        try:
+            result = interpret_requirements(InterpretationRequest(request_reference=body.request_reference, message=body.message), extraction_provider)
+        except GroqProviderError as exc:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, {"reason_code": str(exc)}) from exc
+        except ExtractionValidationError as exc:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, {"reason_code": str(exc)}) from exc
         existing = drafts.get(body.request_reference)
         if existing is not None and existing.owner_subject != identity.subject:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "request not found")

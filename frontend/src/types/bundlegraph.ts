@@ -44,6 +44,8 @@ export interface RequirementInterpretation {
   missing_information: string[];
   clarification_questions: string[];
   provider_mode: string;
+  version?: number;
+  can_confirm?: boolean;
 }
 
 export interface ConfirmedRequirements {
@@ -119,6 +121,43 @@ export interface BundleProposal {
   ranking_rationale?: string[];
 }
 
+export interface EvidenceRecord {
+  evidence_id: string;
+  subject_id: string;
+  attribute: string;
+  observed_value: unknown;
+  source_url?: string | null;
+  source_type: string;
+  observed_at: string;
+  excerpt: string;
+  origin: string;
+  support_status: string;
+  freshness_status: string;
+  conflict_status: string;
+}
+
+export interface AuthoritativePlanVersion {
+  plan_id: string;
+  version: number;
+  fingerprint: string;
+  created_at: string;
+  confirmation_reference: string;
+  correlation_id: string;
+  line_items: Array<BundleLineItem & { merchant_reference: string }>;
+  total: Money;
+  merchant_allocations: Array<{ allocation_id: string; merchant_reference: string; amount: Money; offer_ids: string[] }>;
+  payload: Record<string, unknown>;
+}
+
+export interface AuthoritativePlan {
+  plan_id: string;
+  status: string;
+  current_version: number;
+  created_at: string;
+  updated_at: string;
+  versions: AuthoritativePlanVersion[];
+}
+
 export interface BundleSelectionResult {
   search_status: string;
   proposals: BundleProposal[];
@@ -174,6 +213,24 @@ export interface ApprovalRecord {
   status: string;
   created_at: string;
   valid: boolean;
+  plan_fingerprint?: string;
+}
+
+export type PipelineStage =
+  | 'idle'
+  | 'resolving_requirements'
+  | 'discovering_candidates'
+  | 'checking_evidence'
+  | 'evaluating_compatibility'
+  | 'selecting_bundles'
+  | 'persisting_plan'
+  | 'complete';
+
+export interface ApiFailure {
+  status: number;
+  reason_code: string;
+  message: string;
+  correlation_id?: string;
 }
 
 export interface ExecutionRecord {

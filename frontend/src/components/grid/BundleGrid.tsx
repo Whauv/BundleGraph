@@ -1,10 +1,12 @@
 import React, { useMemo } from 'react';
 import { AgGridReact } from 'ag-grid-react';
-import type { ColDef } from 'ag-grid-community';
+import { ClientSideRowModelModule, ModuleRegistry, TextFilterModule, type ColDef } from 'ag-grid-community';
 import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-quartz.css';
 import type { BundleProposal } from '../../types/bundlegraph';
-import { Table, CheckCircle2 } from 'lucide-react';
+import { Table } from 'lucide-react';
+
+ModuleRegistry.registerModules([ClientSideRowModelModule, TextFilterModule]);
 
 interface BundleGridProps {
   proposal: BundleProposal | null;
@@ -61,8 +63,8 @@ export const BundleGrid: React.FC<BundleGridProps> = ({ proposal }) => {
       quantity: item.quantity,
       unitPrice: `$${(item.unit_price.amount_minor / 100).toFixed(2)}`,
       lineTotal: `$${(item.merchandise_total.amount_minor / 100).toFixed(2)}`,
-      availability: 'In Stock (Curated)',
-      status: 'VERIFIED COMPATIBLE',
+      availability: 'See authoritative offer evidence',
+      status: proposal.compatibility_report.classification,
     }));
   }, [proposal]);
 
@@ -78,9 +80,9 @@ export const BundleGrid: React.FC<BundleGridProps> = ({ proposal }) => {
       headerName: 'Rule Verification',
       width: 175,
       cellRenderer: (params: { value: string }) => {
+        const verified = params.value === 'verified_complete';
         return (
-          <span className="badge badge-emerald" style={{ marginTop: '7px' }}>
-            <CheckCircle2 size={11} />
+          <span className={`badge ${verified ? 'badge-emerald' : 'badge-amber'}`} style={{ marginTop: '7px' }}>
             {params.value}
           </span>
         );
@@ -100,6 +102,7 @@ export const BundleGrid: React.FC<BundleGridProps> = ({ proposal }) => {
     <div style={{ width: '100%', marginTop: '0.25rem' }}>
       <div className="ag-theme-quartz-dark" style={{ height: 320, width: '100%', borderRadius: 'var(--radius-sm)', overflow: 'hidden', border: '1px solid var(--border-default)' }}>
         <AgGridReact
+          theme="legacy"
           rowData={rowData}
           columnDefs={columnDefs}
           defaultColDef={{
