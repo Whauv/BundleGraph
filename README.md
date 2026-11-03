@@ -73,7 +73,9 @@ The smoke test performs one bounded Channel3 discovery request. It does not exec
 
 ## Architecture diagram
 
-The interactive [Member 1 intelligence-boundary diagram](docs/architecture/member1-intelligence-boundary.html) shows the deterministic planning path, optional provider adapters, and the Member 2 ownership boundary. Its versioned [Archify source](docs/architecture/member1-intelligence-boundary.architecture.json) is included for future updates.
+The interactive [repository architecture diagram](docs/architecture/bundlegraph-repository.html) follows the full browser-to-API-to-planner-to-persistence journey and marks optional or blocked provider paths. Its versioned [Archify source](docs/architecture/bundlegraph-repository.architecture.json) is included for future updates.
+
+The narrower [Member 1 intelligence-boundary diagram](docs/architecture/member1-intelligence-boundary.html) remains available for the deterministic planning path, optional evidence adapters, and Member 2 ownership boundary.
 
 ## Package boundary
 
