@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+import json
 
 import pytest
 
@@ -6,6 +7,8 @@ from bundlegraph.catalog import OFFLINE_FIXTURE_CATALOG
 from bundlegraph.interpretation import (
     ExtractionValidationError,
     FixtureExtractionProvider,
+    GroqProviderError,
+    GroqStructuredExtractionProvider,
     InterpretationRequest,
     OFFLINE_EXTRACTION_FIXTURES,
     ProviderNotConfigured,
@@ -96,6 +99,33 @@ def test_no_live_provider_is_assumed_and_logs_redact_content() -> None:
     with pytest.raises(ProviderNotConfigured):
         configured_provider()
     assert redact_interpretation_log_fields(InterpretationRequest(request_reference="request-fixture", message="sensitive budget and laptop details")) == {"request_reference": "request-fixture", "message": "[REDACTED]"}
+
+
+def test_groq_provider_decodes_json_and_leaves_schema_validation_upstream() -> None:
+    calls = []
+
+    def post(request, timeout):
+        calls.append((request, timeout))
+        payload = OFFLINE_EXTRACTION_FIXTURES["two-person-usb-c"]
+        response = {"choices": [{"message": {"content": json.dumps(payload)}}]}
+        return 200, json.dumps(response).encode()
+
+    provider = GroqStructuredExtractionProvider("test-key", "test-model", post=post)
+    request = InterpretationRequest(request_reference="request-fixture", message="two-person-usb-c")
+    result = interpret_requirements(request, provider)
+    assert result.provider_mode == "groq"
+    assert result.draft.participants == 2
+    assert calls[0][0].get_header("Authorization") == "Bearer test-key"
+    assert calls[0][1] == 30.0
+
+
+def test_groq_provider_rejects_invalid_provider_response() -> None:
+    def post(request, timeout):
+        return 200, b'{"choices": [{"message": {"content": "not-json"}}]}'
+
+    provider = GroqStructuredExtractionProvider("test-key", "test-model", post=post)
+    with pytest.raises(GroqProviderError, match="GROQ_RESPONSE_INVALID"):
+        provider.extract(InterpretationRequest(request_reference="request-fixture", message="hello"))
 
 
 def test_generate_service_completes_fixture_pipeline_with_contract_envelope() -> None:

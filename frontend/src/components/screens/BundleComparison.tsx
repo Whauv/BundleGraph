@@ -23,10 +23,11 @@ export const BundleComparison: React.FC = () => {
     proposals,
     selectedProposal,
     budgetDollars,
-    approvePlan,
+    preparePlan,
     setStep,
     errorMessage,
     isLoading,
+    evidenceRecords,
   } = useDemo();
 
   const [activeTab, setActiveTab] = useState<'grid' | 'graph' | 'timeline'>('grid');
@@ -147,11 +148,10 @@ export const BundleComparison: React.FC = () => {
     );
   }
 
-  const allInNum = selectedProposal?.cost_breakdown.all_in_total
-    ? selectedProposal.cost_breakdown.all_in_total.amount_minor / 100
-    : 443.00;
-  const allInCost = `$${allInNum.toFixed(2)}`;
-  const headroom = (budgetDollars - allInNum).toFixed(2);
+  const allInNum = selectedProposal?.cost_breakdown.all_in_total?.amount_minor;
+  const allInCost = allInNum === undefined ? 'Unknown' : `$${(allInNum / 100).toFixed(2)}`;
+  const headroom = allInNum === undefined ? null : (budgetDollars - allInNum / 100).toFixed(2);
+  const verified = selectedProposal?.compatibility_report.classification === 'verified_complete';
 
   return (
     <div className="screen-container" style={{ gap: '1rem' }}>
@@ -215,7 +215,7 @@ export const BundleComparison: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.625rem' }}>
           <span style={{ color: '#666666', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Solver Run:</span>
           <span style={{ padding: '0.15rem 0.4rem', borderRadius: '2px', backgroundColor: '#111111', border: '1px solid #222222', color: '#00e575', fontWeight: 600 }}>
-            SOLVER_RUN_0x8F92
+            {selectedProposal?.proposal_key || 'No proposal selected'}
           </span>
         </div>
       </div>
@@ -249,9 +249,9 @@ export const BundleComparison: React.FC = () => {
             </p>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <span className="badge badge-emerald">
-              <CheckCircle2 size={12} />
-              Fully Verified
+            <span className={`badge ${verified ? 'badge-emerald' : 'badge-amber'}`}>
+              {verified ? <CheckCircle2 size={12} /> : <AlertOctagon size={12} />}
+              {selectedProposal?.compatibility_report.classification || 'Unknown'}
             </span>
             <span className="badge badge-sandbox">
               <ShieldCheck size={12} />
@@ -268,7 +268,7 @@ export const BundleComparison: React.FC = () => {
                 Candidate Bundles Evaluated
               </div>
               <div style={{ fontSize: '1rem', fontWeight: 600, color: '#ffffff', fontFamily: 'var(--font-mono)', marginTop: '0.2rem' }}>
-                3 Options (Alpha, Beta, Gamma)
+                {proposals.length} {proposals.length === 1 ? 'proposal' : 'proposals'} returned
               </div>
             </div>
 
@@ -295,7 +295,7 @@ export const BundleComparison: React.FC = () => {
                 Delta to Budget
               </div>
               <div style={{ fontSize: '1.125rem', fontWeight: 700, color: '#00e575', fontFamily: 'var(--font-mono)', marginTop: '0.2rem' }}>
-                +${headroom} Headroom
+                {headroom === null ? 'Unknown' : `${Number(headroom) >= 0 ? '+' : ''}$${headroom} Headroom`}
               </div>
             </div>
           </div>
@@ -332,7 +332,7 @@ export const BundleComparison: React.FC = () => {
           <div>
             <Suspense fallback={<div className="empty-state" role="status">Loading comparison view…</div>}>
               {activeTab === 'grid' && <BundleGrid proposal={selectedProposal} />}
-              {activeTab === 'graph' && <EvidenceGraph report={selectedProposal?.compatibility_report} />}
+              {activeTab === 'graph' && <EvidenceGraph report={selectedProposal?.compatibility_report} evidence={evidenceRecords} />}
               {activeTab === 'timeline' && <ScheduleTimeline deadlineDays={7} isDelayed={false} />}
             </Suspense>
           </div>
@@ -347,7 +347,7 @@ export const BundleComparison: React.FC = () => {
           <button
             type="button"
             className="btn-primary"
-            onClick={approvePlan}
+            onClick={preparePlan}
             disabled={isLoading || !selectedProposal}
             style={{
               padding: '0.55rem 1.25rem',

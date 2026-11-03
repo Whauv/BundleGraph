@@ -28,6 +28,10 @@ class ApplicationSettings:
     database_url: str
     auth_identities: dict[str, dict[str, object]]
     sandbox_recipients: frozenset[str]
+    oidc_introspection_url: str | None = None
+    oidc_client_id: str | None = None
+    oidc_client_secret: str | None = None
+    oidc_audience: str | None = None
 
 
 def runtime_mode(environ: dict[str, str] | None = None) -> RuntimeMode:
@@ -40,14 +44,20 @@ def runtime_mode(environ: dict[str, str] | None = None) -> RuntimeMode:
 
 def application_settings(environ: dict[str, str] | None = None) -> ApplicationSettings:
     values = environ or os.environ
-    missing = tuple(name for name in ("DATABASE_URL", "BUNDLEGRAPH_AUTH_IDENTITIES") if not values.get(name, "").strip())
-    if missing:
-        raise RuntimeError(f"application startup blocked: missing {', '.join(missing)}")
+    if not values.get("DATABASE_URL", "").strip():
+        raise RuntimeError("application startup blocked: missing DATABASE_URL")
+    bearer_configured = bool(values.get("BUNDLEGRAPH_AUTH_IDENTITIES", "").strip())
+    oidc_names = ("BUNDLEGRAPH_OIDC_INTROSPECTION_URL", "BUNDLEGRAPH_OIDC_CLIENT_ID", "BUNDLEGRAPH_OIDC_CLIENT_SECRET")
+    oidc_present = tuple(name for name in oidc_names if values.get(name, "").strip())
+    if not bearer_configured and not oidc_present:
+        raise RuntimeError("application startup blocked: configure BUNDLEGRAPH_AUTH_IDENTITIES or OIDC introspection")
+    if oidc_present and len(oidc_present) != len(oidc_names):
+        raise RuntimeError("application startup blocked: OIDC introspection URL, client ID, and client secret are all required")
     try:
-        identities = json.loads(values["BUNDLEGRAPH_AUTH_IDENTITIES"])
+        identities = json.loads(values["BUNDLEGRAPH_AUTH_IDENTITIES"]) if bearer_configured else {}
     except json.JSONDecodeError as exc:
         raise RuntimeError("BUNDLEGRAPH_AUTH_IDENTITIES must be valid JSON") from exc
-    if not isinstance(identities, dict) or not identities:
+    if bearer_configured and (not isinstance(identities, dict) or not identities):
         raise RuntimeError("BUNDLEGRAPH_AUTH_IDENTITIES must be a non-empty object")
     for token_hash, record in identities.items():
         if len(token_hash) != 64 or any(character not in "0123456789abcdef" for character in token_hash) or not isinstance(record, dict) or not isinstance(record.get("subject"), str) or not record["subject"]:
@@ -55,7 +65,14 @@ def application_settings(environ: dict[str, str] | None = None) -> ApplicationSe
         roles = record.get("roles", [])
         if not isinstance(roles, list) or any(not isinstance(role, str) for role in roles):
             raise RuntimeError("BUNDLEGRAPH_AUTH_IDENTITIES roles must be a list of strings")
-    return ApplicationSettings(database_url=values["DATABASE_URL"], auth_identities=identities, sandbox_recipients=frozenset(item.strip() for item in values.get("BUNDLEGRAPH_SANDBOX_RECIPIENTS", "").split(",") if item.strip()))
+    return ApplicationSettings(
+        database_url=values["DATABASE_URL"], auth_identities=identities,
+        sandbox_recipients=frozenset(item.strip() for item in values.get("BUNDLEGRAPH_SANDBOX_RECIPIENTS", "").split(",") if item.strip()),
+        oidc_introspection_url=values.get("BUNDLEGRAPH_OIDC_INTROSPECTION_URL") or None,
+        oidc_client_id=values.get("BUNDLEGRAPH_OIDC_CLIENT_ID") or None,
+        oidc_client_secret=values.get("BUNDLEGRAPH_OIDC_CLIENT_SECRET") or None,
+        oidc_audience=values.get("BUNDLEGRAPH_OIDC_AUDIENCE") or None,
+    )
 
 
 def frontend_origins(environ: dict[str, str] | None = None) -> tuple[str, ...]:

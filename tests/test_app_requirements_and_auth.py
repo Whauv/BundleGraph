@@ -5,7 +5,7 @@ import pytest
 from bundlegraph.models import ListeningRequirement, ProductCategory
 from bundlegraph.models import ConfirmedRequirements
 from bundlegraph.selection import BundleSelectionRequest, select_bundles
-from bundlegraph_app.auth import ConfiguredBearerAuthenticationProvider, Identity, InMemoryResourceOwnershipRepository
+from bundlegraph_app.auth import ConfiguredBearerAuthenticationProvider, Identity, InMemoryResourceOwnershipRepository, OidcIntrospectionAuthenticationProvider
 from bundlegraph_app.config import application_settings
 from bundlegraph_app.requirements import build_guided_draft
 from bundlegraph_app.manage import local_demo_catalog
@@ -43,6 +43,31 @@ def test_configured_bearer_authentication_uses_only_the_token_hash() -> None:
     assert provider.authenticate(None) is None
 
 
+def test_oidc_introspection_requires_active_unexpired_expected_audience() -> None:
+    calls = []
+    def transport(request, timeout):
+        calls.append((request, timeout))
+        return {"active": True, "sub": "user-oidc", "exp": 4_102_444_800, "aud": ["bundlegraph"], "scope": "plans:read plans:approve"}
+
+    provider = OidcIntrospectionAuthenticationProvider(
+        "https://identity.example/oauth/introspect", "bundlegraph-client", "server-secret",
+        expected_audience="bundlegraph", transport=transport,
+    )
+    identity = provider.authenticate("Bearer short-lived-token")
+
+    assert identity == Identity(subject="user-oidc", roles=frozenset({"plans:read", "plans:approve"}))
+    assert len(calls) == 1
+    assert b"short-lived-token" in calls[0][0].data
+
+
+def test_oidc_introspection_fails_closed_for_inactive_or_wrong_audience() -> None:
+    inactive = OidcIntrospectionAuthenticationProvider("https://identity.example/introspect", "id", "secret", transport=lambda _request, _timeout: {"active": False})
+    wrong_audience = OidcIntrospectionAuthenticationProvider("https://identity.example/introspect", "id", "secret", expected_audience="bundlegraph", transport=lambda _request, _timeout: {"active": True, "sub": "user", "exp": 4_102_444_800, "aud": "other"})
+
+    assert inactive.authenticate("Bearer token") is None
+    assert wrong_audience.authenticate("Bearer token") is None
+
+
 def test_ownership_cannot_be_reassigned() -> None:
     owners = InMemoryResourceOwnershipRepository()
     owners.claim("plan", "plan-1", "user-1")
@@ -58,6 +83,12 @@ def test_application_configuration_is_fail_closed() -> None:
     digest = "a" * 64
     settings = application_settings({"DATABASE_URL": "postgresql://example", "BUNDLEGRAPH_AUTH_IDENTITIES": f'{{"{digest}":{{"subject":"user-1","roles":[]}}}}'})
     assert settings.auth_identities[digest]["subject"] == "user-1"
+
+    oidc = application_settings({"DATABASE_URL": "postgresql://example", "BUNDLEGRAPH_OIDC_INTROSPECTION_URL": "https://identity.example/introspect", "BUNDLEGRAPH_OIDC_CLIENT_ID": "client", "BUNDLEGRAPH_OIDC_CLIENT_SECRET": "secret"})
+    assert oidc.oidc_client_id == "client"
+
+    with pytest.raises(RuntimeError, match="all required"):
+        application_settings({"DATABASE_URL": "postgresql://example", "BUNDLEGRAPH_OIDC_CLIENT_ID": "client"})
 
 
 def test_local_demo_catalog_completes_the_real_selection_path() -> None:

@@ -77,7 +77,7 @@ The interactive [Member 1 intelligence-boundary diagram](docs/architecture/membe
 
 ## Package boundary
 
-`bundlegraph.models` contains the shared contracts. `bundlegraph.catalog` contains the explicitly labeled offline fixture catalog. `bundlegraph.compatibility_graph` evaluates deterministic compatibility, `bundlegraph.selection` performs bounded exact search, and `bundlegraph.interpretation` provides injectable requirement extraction.
+`bundlegraph.models` contains the shared contracts. `bundlegraph.catalog` contains the explicitly labeled offline fixture catalog. `bundlegraph.compatibility_graph` evaluates deterministic compatibility, `bundlegraph.selection` performs bounded exact search, and `bundlegraph.interpretation` provides injectable requirement extraction. A Groq adapter is available when `GROQ_API_KEY` and a currently supported `GROQ_MODEL` are configured server-side; its JSON response is still validated by the same Pydantic schema and never confirms requirements.
 
 ## Member 3 frontend
 
@@ -91,10 +91,10 @@ npm --prefix frontend ci
 npm --prefix frontend run dev
 ```
 
-Open `http://127.0.0.1:5173`. An optional, explicitly non-authoritative demo API
-can be configured with `VITE_BUNDLEGRAPH_DEMO_API_BASE`; configured API failures
-are shown as errors and never replaced by fixture success. See the frontend
-readme for the exact integration and production boundaries.
+Open `http://127.0.0.1:5173`. Fixture mode is explicit. Setting
+`VITE_BUNDLEGRAPH_RUNTIME=authoritative` connects the browser to Member 2's
+authenticated draft, confirmation, plan, evidence, approval, and replan routes;
+configured API failures are shown and never replaced by fixture success.
 
 ## Channel3 discovery
 
@@ -126,7 +126,12 @@ $env:BUNDLEGRAPH_MODE="application"
 python -m uvicorn bundlegraph_app.main:app --host 127.0.0.1 --port 8080
 ```
 
-Open `http://127.0.0.1:8080`, enter the local-only token `local-dev-token` under **Advanced details**, and submit the guided request. The local demo catalog command deliberately activates refreshed synthetic offers with zero synthetic shipping/tax for an end-to-end dry run; never use that command for a live deployment. Use `activate-catalog <catalog-id> <normalized-catalog.json>` for reviewed deployment data.
+Build the browser with `VITE_BUNDLEGRAPH_RUNTIME=authoritative`, open
+`http://127.0.0.1:8080`, and enter the local-only token `local-dev-token` in the
+sign-in gate. The local demo catalog command deliberately activates refreshed
+synthetic offers with zero synthetic shipping/tax for an end-to-end dry run;
+never use that command for a live deployment. Use
+`activate-catalog <catalog-id> <normalized-catalog.json>` for reviewed data.
 
 For a disposable same-origin sandbox with PostgreSQL, migrations, and the labeled
 synthetic catalog:

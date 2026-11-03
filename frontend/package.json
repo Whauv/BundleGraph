@@ -10,6 +10,7 @@
     "lint": "oxlint src vite.config.ts",
     "typecheck": "tsc -b",
     "test": "node --test tests/*.test.mjs",
+    "test:e2e": "playwright test",
     "check": "oxlint src vite.config.ts && tsc -b && node --test tests/*.test.mjs && vite build",
     "check:live": "node --test tests/live-smoke.test.mjs"
   },
@@ -22,6 +23,7 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/node": "^24.19.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

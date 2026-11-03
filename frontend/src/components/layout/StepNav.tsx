@@ -19,7 +19,14 @@ const STEPS: StepItem[] = [
 ];
 
 export const StepNav: React.FC = () => {
-  const { currentStep, setStep } = useDemo();
+  const { currentStep, setStep, interpretation, proposals, approvalRecord, executionRecord } = useDemo();
+  const enabled: Record<ScreenStep, boolean> = {
+    builder: true,
+    review: Boolean(interpretation),
+    comparison: proposals.length > 0,
+    approval: Boolean(approvalRecord),
+    execution: Boolean(executionRecord),
+  };
 
   return (
     <div style={{ height: '44px', width: '100%', backgroundColor: '#000000', borderBottom: '1px solid #222222', padding: '0 1.25rem' }}>
@@ -34,6 +41,7 @@ export const StepNav: React.FC = () => {
               type="button"
               className={`step-tab ${isActive ? 'active' : ''}`}
               onClick={() => setStep(step.id)}
+              disabled={!enabled[step.id]}
               aria-current={isActive ? 'step' : undefined}
               style={{
                 height: '100%',

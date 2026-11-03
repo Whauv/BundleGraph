@@ -22,21 +22,26 @@ test('package scripts validate and build the canonical frontend', () => {
   assert.equal(packageJson.dependencies.react.startsWith('^19'), true);
 });
 
-test('configured demo backend errors cannot silently fall back to fixtures', () => {
-  assert.match(clientSource, /if \(!DEMO_API_BASE\) return cloneFixture\(fixture\)/);
-  assert.match(clientSource, /Fixture data was not substituted/);
+test('authoritative failures cannot silently fall back to fixtures', () => {
+  assert.match(clientSource, /configuredRuntime === 'authoritative'/);
+  assert.match(clientSource, /throw error/);
   assert.doesNotMatch(clientSource, /http:\/\/localhost:8000/);
 });
 
-test('all browser mutations stay behind the explicit demo API namespace', () => {
+test('browser uses the authoritative Member 2 workflow contracts', () => {
   for (const route of [
-    '/api/requirements/interpret',
-    '/api/requirements/confirm',
-    '/api/bundle-plans/generate',
-    '/api/bundle-plans/replan',
-    '/api/approvals/create',
-    '/api/executions/simulate',
+    '/requirement-drafts/guided',
+    '/bundle-plans/generate',
+    '/plans',
+    '/approvals',
+    '/replan-proposals',
   ]) {
     assert.match(clientSource, new RegExp(route.replaceAll('/', '\\/')));
   }
+});
+
+test('authoritative requests carry bearer authentication and correlation IDs', () => {
+  assert.match(clientSource, /Authorization: `Bearer \$\{token\}`/);
+  assert.match(clientSource, /X-Correlation-ID/);
+  assert.match(clientSource, /AUTHENTICATION_REQUIRED/);
 });

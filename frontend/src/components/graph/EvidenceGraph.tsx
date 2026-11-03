@@ -7,14 +7,15 @@ import {
   type Edge,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import type { CompatibilityReport, Finding } from '../../types/bundlegraph';
+import type { CompatibilityReport, EvidenceRecord, Finding } from '../../types/bundlegraph';
 import { ShieldCheck, ChevronRight, X, FileText } from 'lucide-react';
 
 interface EvidenceGraphProps {
   report?: CompatibilityReport;
+  evidence?: EvidenceRecord[];
 }
 
-export const EvidenceGraph: React.FC<EvidenceGraphProps> = ({ report }) => {
+export const EvidenceGraph: React.FC<EvidenceGraphProps> = ({ report, evidence = [] }) => {
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
 
   const initialNodes: Node[] = useMemo(() => [
@@ -120,9 +121,9 @@ export const EvidenceGraph: React.FC<EvidenceGraphProps> = ({ report }) => {
   const findings = report?.findings || [];
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '0.75rem', marginTop: '0.25rem' }}>
+    <div className="evidence-layout">
       {/* React Flow Canvas */}
-      <div style={{ height: 420, backgroundColor: '#030712', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ height: 420, width: '100%', minWidth: 0, backgroundColor: '#030712', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', position: 'relative', overflow: 'hidden' }}>
         <ReactFlow nodes={initialNodes} edges={initialEdges} fitView>
           <Background color="rgba(255, 255, 255, 0.05)" gap={16} />
           <Controls />
@@ -147,6 +148,7 @@ export const EvidenceGraph: React.FC<EvidenceGraphProps> = ({ report }) => {
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
           {findings.map((f) => {
             const isComp = f.status === 'compatible';
+            const isUnknown = f.status === 'unknown';
             const isSelected = selectedFinding?.rule_id === f.rule_id;
             return (
               <button
@@ -175,8 +177,8 @@ export const EvidenceGraph: React.FC<EvidenceGraphProps> = ({ report }) => {
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <span className={`badge ${isComp ? 'badge-emerald' : 'badge-rose'}`} style={{ fontSize: '0.625rem', padding: '0.1rem 0.35rem' }}>
-                    {isComp ? 'PASS' : 'FAIL'}
+                  <span className={`badge ${isComp ? 'badge-emerald' : isUnknown ? 'badge-amber' : 'badge-rose'}`} style={{ fontSize: '0.625rem', padding: '0.1rem 0.35rem' }}>
+                    {isComp ? 'PASS' : isUnknown ? 'UNKNOWN' : 'FAIL'}
                   </span>
                   <ChevronRight size={12} style={{ color: 'var(--text-dim)' }} />
                 </div>
@@ -208,17 +210,30 @@ export const EvidenceGraph: React.FC<EvidenceGraphProps> = ({ report }) => {
             {selectedFinding.explanation}
           </p>
           {selectedFinding.evidence_ids.length > 0 && (
-            <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
-              <strong>Verified Evidence IDs:</strong>
+            <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', display: 'grid', gap: '0.5rem' }}>
+              <strong>Evidence records:</strong>
               {selectedFinding.evidence_ids.map((id) => (
-                <span key={id} className="badge badge-neutral tabular-num" style={{ fontSize: '0.625rem' }}>
-                  {id}
-                </span>
+                <EvidenceDetail key={id} evidenceId={id} record={evidence.find((item) => item.evidence_id === id)} />
               ))}
             </div>
           )}
+          {selectedFinding.missing_requirements_or_evidence?.length ? (
+            <p className="callout callout-error">Missing: {selectedFinding.missing_requirements_or_evidence.join(', ')}</p>
+          ) : null}
         </div>
       )}
     </div>
+  );
+};
+
+const EvidenceDetail: React.FC<{ evidenceId: string; record?: EvidenceRecord }> = ({ evidenceId, record }) => {
+  if (!record) return <span className="badge badge-neutral tabular-num">{evidenceId} · record not loaded</span>;
+  return (
+    <article className="surface-panel" id={`evidence-${evidenceId}`} tabIndex={0}>
+      <strong>{record.attribute}</strong> · {String(record.observed_value)}
+      <div>{record.excerpt}</div>
+      <div>{record.source_type} · {new Date(record.observed_at).toLocaleString()} · {record.freshness_status} · conflict: {record.conflict_status}</div>
+      {record.source_url ? <a href={record.source_url} target="_blank" rel="noreferrer">Open source</a> : <span>Source reference unavailable</span>}
+    </article>
   );
 };

@@ -19,6 +19,6 @@ test('fixture approval and execution IDs are stable and visibly labeled', () => 
 });
 
 test('browser configuration contains no credential variables', () => {
-  assert.match(clientSource, /VITE_BUNDLEGRAPH_DEMO_API_BASE/);
+  assert.match(clientSource, /VITE_BUNDLEGRAPH_API_BASE/);
   assert.doesNotMatch(clientSource, /CLIENT_SECRET|API_KEY|DATABASE_URL|PAYPAL_CLIENT_ID/);
 });

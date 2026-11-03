@@ -4,6 +4,8 @@ WORKDIR /frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend ./
+ARG VITE_BUNDLEGRAPH_RUNTIME=authoritative
+ENV VITE_BUNDLEGRAPH_RUNTIME=$VITE_BUNDLEGRAPH_RUNTIME
 RUN npm run build
 
 FROM python:3.12-slim AS runtime

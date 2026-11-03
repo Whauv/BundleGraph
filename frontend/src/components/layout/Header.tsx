@@ -1,6 +1,7 @@
 import React from 'react';
 import { useDemo } from '../../store/demoStore';
-import { Layers, RotateCcw, SlidersHorizontal, User } from 'lucide-react';
+import { Layers, LogOut, RotateCcw, SlidersHorizontal, User } from 'lucide-react';
+import { clearSession } from '../../auth/session';
 
 export const Header: React.FC = () => {
   const { presets, activePresetId, loadPreset, resetAll, isLoading, runtimeMode, runtimeLabel } = useDemo();
@@ -88,7 +89,7 @@ export const Header: React.FC = () => {
               color: '#888888',
             }}
           >
-            <span>Curated Fixtures: <strong style={{ color: '#ffffff' }}>24 SKUs</strong></span>
+            <span>{runtimeMode === 'fixture' ? <>Curated Fixtures: <strong style={{ color: '#ffffff' }}>24 SKUs</strong></> : 'Server catalog'}</span>
           </div>
 
           <button
@@ -101,6 +102,13 @@ export const Header: React.FC = () => {
             <RotateCcw size={12} />
             <span>Reset Session</span>
           </button>
+
+          {runtimeMode === 'authoritative' && (
+            <button type="button" className="reset-btn" onClick={clearSession} title="End the protected browser session">
+              <LogOut size={12} />
+              <span>Sign out</span>
+            </button>
+          )}
 
           <div
             style={{
@@ -149,7 +157,7 @@ export const Header: React.FC = () => {
           <span>
             Runtime:{' '}
             <strong style={{ color: runtimeMode === 'fixture' ? '#fabc45' : '#00e575' }}>
-              {runtimeMode === 'fixture' ? 'FIXTURE_ONLY' : 'DEMO_API_CONNECTED'}
+              {runtimeMode === 'fixture' ? 'FIXTURE_ONLY' : 'AUTHORITATIVE_API'}
             </strong>
           </span>
         </div>

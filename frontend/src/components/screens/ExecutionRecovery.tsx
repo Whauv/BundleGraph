@@ -27,6 +27,8 @@ export const ExecutionRecovery: React.FC = () => {
     resetAll,
     setStep,
     isLoading,
+    selectedProposal,
+    runtimeMode,
   } = useDemo();
 
   const [reapproved, setReapproved] = useState(false);
@@ -34,9 +36,16 @@ export const ExecutionRecovery: React.FC = () => {
   const [downloadedLog, setDownloadedLog] = useState(false);
 
   const isFailed = executionRecord?.execution_status === 'FAILED_MERCHANT_STOCK_OUTAGE' || Boolean(replanResult);
+  const replacement = replanResult?.replacements[0];
+  const displayMoney = (amount?: { amount_minor: number; currency: string } | null) => amount
+    ? `${(amount.amount_minor / 100).toLocaleString(undefined, { style: 'currency', currency: amount.currency })}`
+    : 'Unknown';
+  const settledAmount = executionRecord?.amount_minor === undefined ? null : { amount_minor: executionRecord.amount_minor, currency: executionRecord.currency || 'USD' };
+  const proposalTotal = replacement?.proposal.cost_breakdown.all_in_total || selectedProposal?.cost_breakdown.all_in_total;
 
   const handleCopyTxn = () => {
-    const txnId = executionRecord?.transaction_id || 'PAYPAL-TXN-8A92BC34E10F';
+    const txnId = executionRecord?.transaction_id;
+    if (!txnId) return;
     navigator.clipboard?.writeText(txnId);
     setCopiedTxn(true);
     setTimeout(() => setCopiedTxn(false), 2000);
@@ -67,11 +76,11 @@ export const ExecutionRecovery: React.FC = () => {
                   Settlement Verification &amp; Autonomous Failure Recovery
                 </h1>
                 <span style={{ padding: '0.125rem 0.375rem', borderRadius: '2px', background: '#161616', border: '1px solid #2c2c2c', fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', color: '#ffffff' }}>
-                  gemini-1.5-pro-deterministic
+                  deterministic-rule-engine
                 </span>
               </div>
               <p style={{ fontSize: '0.8125rem', color: '#999999', margin: '0.2rem 0 0 0' }}>
-                Inspect PayPal sandbox execution status, simulate merchant inventory outages, and review dependency-preserving re-planning deltas.
+                Review authoritative execution facts and dependency-preserving re-planning deltas. Fixture execution remains simulated.
               </p>
             </div>
           </div>
@@ -92,13 +101,14 @@ export const ExecutionRecovery: React.FC = () => {
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#ffffff' }}>
-                  PayPal Payments v2 Sandbox Capture Settled
+                  {executionRecord?.execution_status === 'COMPLETED' ? 'Execution completed' : 'No settled payment recorded'}
                 </span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.625rem', color: '#777777', textTransform: 'uppercase' }}>TXN REF:</span>
                   <button
                     type="button"
                     onClick={handleCopyTxn}
+                    disabled={!executionRecord?.transaction_id}
                     style={{
                       background: '#111111',
                       border: '1px solid #282828',
@@ -114,21 +124,19 @@ export const ExecutionRecovery: React.FC = () => {
                     }}
                     title="Click to copy Transaction Hash"
                   >
-                    <span>{executionRecord?.transaction_id || 'PAYPAL-TXN-8A92BC34E10F'}</span>
+                    <span>{executionRecord?.transaction_id || 'Not available'}</span>
                     {copiedTxn ? <Check size={12} style={{ color: '#00e575' }} /> : <Copy size={12} style={{ color: '#777777' }} />}
                   </button>
                 </div>
               </div>
               <p style={{ fontSize: '0.8125rem', color: '#999999', margin: '0.25rem 0 0 0' }}>
-                Idempotency token bound and verified. Synthetic merchant orders dispatched to inventory fulfillment.
+                {executionRecord?.message || 'No execution response has been recorded.'}
               </p>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#000000', padding: '0.25rem 0.5rem', borderRadius: '2px', border: '1px solid #222222', fontFamily: 'var(--font-mono)', fontSize: '0.6875rem' }}>
-            <span style={{ color: '#777777' }}>Idempotency Key:</span>
-            <span style={{ color: '#ffffff' }}>0x4f92..8b31</span>
-            <span style={{ color: '#444444' }}>|</span>
-            <span style={{ color: '#00e575' }}>REPLAY_SAFE</span>
+            <span style={{ color: '#777777' }}>Runtime:</span>
+            <span style={{ color: '#ffffff' }}>{runtimeMode}</span>
           </div>
         </div>
 
@@ -138,7 +146,7 @@ export const ExecutionRecovery: React.FC = () => {
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.625rem', color: '#777777', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Settled Total</span>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.375rem', marginTop: '0.15rem' }}>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '1.125rem', fontWeight: 600, color: '#ffffff' }}>
-                {isFailed && replanResult ? '$415.00' : '$443.00'}
+                {displayMoney(settledAmount || proposalTotal)}
               </span>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', color: '#888888' }}>USD (Exact Capture)</span>
             </div>
@@ -153,8 +161,8 @@ export const ExecutionRecovery: React.FC = () => {
           <div style={{ background: '#0d0d0d', padding: '0.5rem', borderRadius: '2px', border: '1px solid #222222' }}>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.625rem', color: '#777777', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Capture Protocol Latency</span>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.375rem', marginTop: '0.15rem' }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '1.125rem', fontWeight: 600, color: '#ffffff' }}>184ms</span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', color: '#777777' }}>HTTP 201 Created (v2/checkout)</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '1.125rem', fontWeight: 600, color: '#ffffff' }}>Not measured</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', color: '#777777' }}>No client-side latency claim</span>
             </div>
           </div>
         </div>
@@ -221,7 +229,7 @@ export const ExecutionRecovery: React.FC = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', color: '#fabc45' }}>
                 <RefreshCw size={14} />
-                <span style={{ fontWeight: 600 }}>Replanning Triggered: RODE PodMic SKU Outage Detected at B&amp;H</span>
+                <span style={{ fontWeight: 600 }}>Replanning triggered: {executionRecord?.failed_offer_id || replacement?.removed_items[0]?.offer_id || 'selected offer'} unavailable</span>
               </div>
               <span style={{ color: '#00e575', fontWeight: 600 }}>Topological Feasibility: PRESERVED</span>
             </div>
@@ -230,13 +238,13 @@ export const ExecutionRecovery: React.FC = () => {
             <div style={{ background: '#000000', padding: '0.625rem', borderRadius: '2px', border: '1px solid #222222', fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '0.75rem' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                 <span style={{ color: '#ff5555', textTransform: 'uppercase', fontWeight: 600 }}>Evicted Edge &amp; Node:</span>
-                <span style={{ color: '#ffffff' }}>RODE PodMic Dynamic XLR (Qty 2) • Unit Cost: $99.00</span>
-                <span style={{ color: '#777777' }}>Interface Constraint: XLR_M_BALANCED • Power: Dynamic (0V)</span>
+                <span style={{ color: '#ffffff' }}>{replacement?.removed_items.map((item) => `${item.product_id} (${item.offer_id}), qty ${item.previous_quantity}`).join('; ') || 'No removed-item delta returned'}</span>
+                <span style={{ color: '#777777' }}>{replacement?.removed_items[0]?.reason_code || 'Reason unavailable'}</span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                 <span style={{ color: '#00e575', textTransform: 'uppercase', fontWeight: 600 }}>Dependency-Preserving Replacement:</span>
-                <span style={{ color: '#ffffff' }}>Shure MV7X Dynamic XLR (Qty 2) • Unit Cost: $119.00</span>
-                <span style={{ color: '#00e575' }}>Interface Match: PASS (Dual XLR Direct Compatible)</span>
+                <span style={{ color: '#ffffff' }}>{replacement?.added_items.map((item) => `${item.product_id} (${item.offer_id}), qty ${item.replacement_quantity}`).join('; ') || 'No added-item delta returned'}</span>
+                <span style={{ color: '#00e575' }}>{replacement?.proposal.compatibility_report.classification || 'Compatibility result unavailable'}</span>
               </div>
             </div>
 
@@ -262,10 +270,10 @@ export const ExecutionRecovery: React.FC = () => {
                   <span>Removed (Out of Stock)</span>
                 </div>
                 <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#ffffff' }}>
-                  2x Synthetic Mic Alpha
+                  {replacement?.removed_items.map((item) => `${item.previous_quantity}x ${item.product_id}`).join(', ') || 'None'}
                 </div>
                 <div className="tabular-num" style={{ fontSize: '0.75rem', color: '#888888', marginTop: '0.2rem', fontFamily: 'var(--font-mono)' }}>
-                  Prior Subtotal: $198.00 USD
+                  Recovery value: unknown unless supplied by execution facts
                 </div>
               </div>
 
@@ -276,10 +284,10 @@ export const ExecutionRecovery: React.FC = () => {
                   <span>Added (Verified Alternative)</span>
                 </div>
                 <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#ffffff' }}>
-                  2x Synthetic Mic Gamma
+                  {replacement?.added_items.map((item) => `${item.replacement_quantity}x ${item.product_id}`).join(', ') || 'None'}
                 </div>
                 <div className="tabular-num" style={{ fontSize: '0.75rem', color: '#888888', marginTop: '0.2rem', fontFamily: 'var(--font-mono)' }}>
-                  Replacement Subtotal: $170.00 USD
+                  Reason: {replacement?.added_items[0]?.reason_code || 'Unavailable'}
                 </div>
               </div>
 
@@ -290,9 +298,8 @@ export const ExecutionRecovery: React.FC = () => {
                   <span>Retained (Locked Cart)</span>
                 </div>
                 <ul style={{ fontSize: '0.75rem', color: '#888888', paddingLeft: '1rem', margin: 0, display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                  <li>1x Interface Two (2 XLR inputs)</li>
-                  <li>2x XLR Cables (3m balanced)</li>
-                  <li>2x Headphones Alpha (TRS)</li>
+                  {replacement?.retained_items.map((item) => <li key={item.offer_id}>{item.replacement_quantity}x {item.product_id}</li>)}
+                  {!replacement?.retained_items.length && <li>None returned</li>}
                 </ul>
               </div>
             </div>
@@ -302,14 +309,14 @@ export const ExecutionRecovery: React.FC = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <span style={{ fontSize: '0.75rem', color: '#888888' }}>Updated Total:</span>
                 <span className="tabular-num" style={{ fontSize: '1rem', fontWeight: 700, color: '#00e575', fontFamily: 'var(--font-mono)' }}>
-                  $415.00 USD
+                  {displayMoney(proposalTotal)}
                 </span>
                 <span className="badge badge-emerald tabular-num">
-                  -$28.00 Net Savings
+                  Delta: {displayMoney(replacement?.cost_difference)}
                 </span>
               </div>
               <div style={{ fontSize: '0.75rem', color: '#888888' }}>
-                Schedule Impact: <strong style={{ color: '#ffffff' }}>+1 Transit Day</strong> (Within 2-day buffer before launch)
+                Delivery impact: <strong style={{ color: '#ffffff' }}>unknown without delivery evidence</strong>
               </div>
             </div>
 
@@ -319,15 +326,15 @@ export const ExecutionRecovery: React.FC = () => {
                 <Zap size={15} style={{ color: '#fabc45' }} />
                 <div>
                   <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#ffffff' }}>
-                    Zapier Webhook Notification Broadcasted
+                    Operations notification
                   </span>
                   <p style={{ fontSize: '0.6875rem', color: '#777777', margin: 0 }}>
-                    Payload: <code style={{ fontFamily: 'var(--font-mono)', color: '#ffffff' }}>bundle_replan_recovery</code> dispatched to operations webhook.
+                    No delivery claim is shown unless an authoritative notification response is available.
                   </p>
                 </div>
               </div>
               <span className="badge badge-neutral tabular-num" style={{ color: '#00e575' }}>
-                HTTP 200 Delivered
+                Not configured
               </span>
             </div>
           </div>
@@ -373,7 +380,7 @@ export const ExecutionRecovery: React.FC = () => {
               ) : (
                 <>
                   <ShieldCheck size={14} />
-                  <span>Approve Plan 2.0 ($415.00) &amp; Settle PayPal</span>
+                  <span>Review revised plan ({displayMoney(proposalTotal)})</span>
                   <ArrowRight size={14} />
                 </>
               )}

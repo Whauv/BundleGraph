@@ -1,10 +1,15 @@
 """Authentication and resource-ownership boundaries."""
 from __future__ import annotations
 import hashlib
+import json
 import secrets
+import time
+from base64 import b64encode
 from dataclasses import dataclass
 from threading import RLock
-from typing import Protocol
+from typing import Any, Callable, Protocol
+from urllib.parse import urlencode, urlsplit
+from urllib.request import Request, urlopen
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +49,80 @@ class ConfiguredBearerAuthenticationProvider:
             if secrets.compare_digest(digest, configured):
                 return identity
         return None
+
+
+class OidcIntrospectionAuthenticationProvider:
+    """Validate short-lived OAuth access tokens through RFC 7662 introspection.
+
+    The transport is injectable so normal tests never call an identity provider.
+    Tokens and client credentials are never returned or logged by this boundary.
+    """
+
+    def __init__(
+        self,
+        introspection_url: str,
+        client_id: str,
+        client_secret: str,
+        *,
+        expected_audience: str | None = None,
+        timeout_seconds: float = 5.0,
+        transport: Callable[[Request, float], dict[str, Any]] | None = None,
+    ) -> None:
+        parsed = urlsplit(introspection_url)
+        if parsed.scheme not in {"https", "http"} or not parsed.netloc:
+            raise ValueError("OIDC introspection URL must be HTTP(S)")
+        self._url = introspection_url
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._expected_audience = expected_audience
+        self._timeout = timeout_seconds
+        self._transport = transport or self._request
+
+    @staticmethod
+    def _request(request: Request, timeout: float) -> dict[str, Any]:
+        with urlopen(request, timeout=timeout) as response:  # noqa: S310 -- URL is deployment configuration
+            payload = json.loads(response.read(64 * 1024))
+        if not isinstance(payload, dict):
+            raise ValueError("introspection response must be an object")
+        return payload
+
+    def authenticate(self, authorization: str | None) -> Identity | None:
+        if not authorization or not authorization.startswith("Bearer "):
+            return None
+        token = authorization[7:].strip()
+        if not token:
+            return None
+        basic = b64encode(f"{self._client_id}:{self._client_secret}".encode()).decode()
+        request = Request(
+            self._url,
+            data=urlencode({"token": token, "token_type_hint": "access_token"}).encode(),
+            headers={"Authorization": f"Basic {basic}", "Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        try:
+            payload = self._transport(request, self._timeout)
+        except Exception:
+            return None
+        if payload.get("active") is not True:
+            return None
+        subject = payload.get("sub") or payload.get("username")
+        if not isinstance(subject, str) or not subject:
+            return None
+        expires_at = payload.get("exp")
+        if not isinstance(expires_at, (int, float)) or expires_at <= time.time():
+            return None
+        if self._expected_audience:
+            audience = payload.get("aud")
+            audiences = {audience} if isinstance(audience, str) else set(audience or ())
+            if self._expected_audience not in audiences:
+                return None
+        raw_roles = payload.get("roles")
+        if isinstance(raw_roles, list) and all(isinstance(role, str) for role in raw_roles):
+            roles = frozenset(raw_roles)
+        else:
+            scope = payload.get("scope", "")
+            roles = frozenset(scope.split()) if isinstance(scope, str) else frozenset()
+        return Identity(subject=subject, roles=roles)
 
 
 class ResourceOwnershipRepository(Protocol):

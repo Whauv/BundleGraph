@@ -2,6 +2,7 @@ import React, { lazy, Suspense } from 'react';
 import { DemoProvider, useDemo } from './store/demoStore';
 import { Header } from './components/layout/Header';
 import { StepNav } from './components/layout/StepNav';
+import { AuthGate } from './components/auth/AuthGate';
 
 const RequestBuilder = lazy(() => import('./components/screens/RequestBuilder').then((module) => ({ default: module.RequestBuilder })));
 const RequirementsReview = lazy(() => import('./components/screens/RequirementsReview').then((module) => ({ default: module.RequirementsReview })));
@@ -10,10 +11,19 @@ const PlanApproval = lazy(() => import('./components/screens/PlanApproval').then
 const ExecutionRecovery = lazy(() => import('./components/screens/ExecutionRecovery').then((module) => ({ default: module.ExecutionRecovery })));
 
 const MainView: React.FC = () => {
-  const { currentStep } = useDemo();
+  const { currentStep, pipelineStage, apiFailure, retryLastAction } = useDemo();
 
   return (
     <main className="main-content">
+      <div className="workflow-status" role="status" aria-live="polite">
+        <span>Pipeline: {pipelineStage.replaceAll('_', ' ')}</span>
+        {apiFailure && (
+          <span className="workflow-error" role="alert">
+            {apiFailure.reason_code}: {apiFailure.message}{apiFailure.correlation_id ? ` · ${apiFailure.correlation_id}` : ''}
+            <button type="button" className="btn-secondary" onClick={() => retryLastAction()}>Retry</button>
+          </span>
+        )}
+      </div>
       <Suspense fallback={<div className="screen-container" role="status">Loading interface…</div>}>
         {currentStep === 'builder' && <RequestBuilder />}
         {currentStep === 'review' && <RequirementsReview />}
@@ -33,7 +43,7 @@ const RuntimeFooter: React.FC = () => {
       <div style={{ maxWidth: '1440px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
         <span>BundleGraph · deterministic compatibility presentation</span>
         <span style={{ color: runtimeMode === 'fixture' ? '#fabc45' : '#00e575' }}>
-          {runtimeLabel} · {runtimeMode === 'fixture' ? 'no provider, approval, or payment calls' : 'demo endpoints only'}
+          {runtimeLabel} · {runtimeMode === 'fixture' ? 'no provider, approval, or payment calls' : 'authenticated authoritative state'}
         </span>
       </div>
     </footer>
@@ -42,14 +52,16 @@ const RuntimeFooter: React.FC = () => {
 
 export const App: React.FC = () => {
   return (
-    <DemoProvider>
-      <div className="app-container">
-        <Header />
-        <StepNav />
-        <MainView />
-        <RuntimeFooter />
-      </div>
-    </DemoProvider>
+    <AuthGate>
+      <DemoProvider>
+        <div className="app-container">
+          <Header />
+          <StepNav />
+          <MainView />
+          <RuntimeFooter />
+        </div>
+      </DemoProvider>
+    </AuthGate>
   );
 };
 

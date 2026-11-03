@@ -16,19 +16,28 @@ export const PlanApproval: React.FC = () => {
     executeOrder,
     setStep,
     isLoading,
+    authoritativePlan,
+    runtimeMode,
+    triggerReplan,
+    approvePlan,
   } = useDemo();
 
   const [simulateFailure, setSimulateFailure] = useState(false);
 
   const amountDollars = selectedProposal?.cost_breakdown.all_in_total
     ? (selectedProposal.cost_breakdown.all_in_total.amount_minor / 100).toFixed(2)
-    : '443.00';
+    : null;
 
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
+    if (!approvalRecord) {
+      await approvePlan();
+      return;
+    }
     if (simulateFailure) {
-      executeOrder('offer-mic-alpha');
+      if (runtimeMode === 'fixture') await executeOrder('offer-mic-alpha');
+      else await triggerReplan(selectedProposal?.line_items[0]?.offer_id);
     } else {
-      executeOrder();
+      await executeOrder();
     }
   };
 
@@ -154,7 +163,7 @@ export const PlanApproval: React.FC = () => {
             }}
           >
             <ShieldCheck size={14} style={{ color: '#00e575' }} />
-            <span>PayPal Payments v2 Bound</span>
+            <span>{runtimeMode === 'fixture' ? 'Simulated approval' : 'Authoritative plan approval'}</span>
           </div>
         </div>
 
@@ -166,7 +175,7 @@ export const PlanApproval: React.FC = () => {
                 Durable Plan Reference
               </span>
               <div style={{ fontSize: '0.9375rem', fontWeight: 600, fontFamily: 'var(--font-mono)', color: '#ffffff' }}>
-                {approvalRecord?.plan_id || selectedProposal?.proposal_key || 'plan-v1-8f92'}
+                {authoritativePlan?.plan_id || approvalRecord?.plan_id || 'Not persisted'}
               </div>
             </div>
 
@@ -176,7 +185,7 @@ export const PlanApproval: React.FC = () => {
               </span>
               <div style={{ fontSize: '0.9375rem', fontWeight: 600, fontFamily: 'var(--font-mono)', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                 <CheckCircle2 size={13} style={{ color: '#00e575' }} />
-                <span>Version 1.0 (Locked)</span>
+                <span>Version {authoritativePlan?.current_version ?? approvalRecord?.plan_version ?? 'unknown'} (Locked)</span>
               </div>
             </div>
 
@@ -185,7 +194,7 @@ export const PlanApproval: React.FC = () => {
                 Approval Session Token
               </span>
               <div style={{ fontSize: '0.9375rem', fontWeight: 600, fontFamily: 'var(--font-mono)', color: '#00e575' }}>
-                {approvalRecord?.approval_id || 'appr-token-bound-v1'}
+                {approvalRecord?.approval_id || 'Not approved'}
               </div>
             </div>
 
@@ -194,8 +203,8 @@ export const PlanApproval: React.FC = () => {
                 Authorized All-In Total
               </span>
               <div style={{ fontSize: '1.25rem', fontWeight: 700, fontFamily: 'var(--font-mono)', color: '#ffffff', display: 'flex', alignItems: 'baseline', gap: '0.25rem' }}>
-                <span>${amountDollars}</span>
-                <span style={{ fontSize: '0.6875rem', color: '#888888', fontWeight: 500 }}>USD</span>
+                <span>{amountDollars ? `$${amountDollars}` : 'Unknown'}</span>
+                <span style={{ fontSize: '0.6875rem', color: '#888888', fontWeight: 500 }}>{selectedProposal?.cost_breakdown.currency || ''}</span>
               </div>
             </div>
           </div>
@@ -323,7 +332,7 @@ export const PlanApproval: React.FC = () => {
             type="button"
             className="btn-primary"
             onClick={handleCheckout}
-            disabled={isLoading}
+            disabled={isLoading || (Boolean(approvalRecord) && runtimeMode === 'authoritative' && !simulateFailure)}
             style={{
               padding: '0.55rem 1.25rem',
               fontSize: '0.875rem',
@@ -340,7 +349,7 @@ export const PlanApproval: React.FC = () => {
             ) : (
               <>
                 <CreditCard size={14} />
-                <span>Authorize &amp; Bind Plan (${amountDollars})</span>
+                <span>{!approvalRecord ? 'Approve exact stored plan version' : runtimeMode === 'fixture' ? `Run simulated execution (${amountDollars ? `$${amountDollars}` : 'unknown'})` : 'Payments disabled · test recovery proposal'}</span>
                 <ArrowRight size={15} />
               </>
             )}

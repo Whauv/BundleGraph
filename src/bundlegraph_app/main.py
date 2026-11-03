@@ -15,10 +15,11 @@ from .paypal import DisabledPayPalClient, FakeSandboxClient, PayPalAdapter
 from .persistence import new_in_memory_repositories
 from .planning import PlanningInputsRepository
 from .config import RuntimeMode, application_settings, frontend_origins, production_settings, runtime_mode
-from .auth import ConfiguredBearerAuthenticationProvider, Identity, RejectingAuthenticationProvider
+from .auth import ConfiguredBearerAuthenticationProvider, Identity, OidcIntrospectionAuthenticationProvider, RejectingAuthenticationProvider
 from .postgres import PostgresApprovalRepository, PostgresCatalogRepository, PostgresEvidenceReader, PostgresPaymentRepository, PostgresPlanRepository, PostgresPlanningInputsRepository, PostgresRequirementDraftRepository, PostgresResourceOwnershipRepository, PostgresWebhookEventRepository, postgres_ready
 from .discovery import CatalogCandidateDiscovery, Channel3CandidateDiscovery
 from bundlegraph.channel3 import Channel3DiscoveryAdapter
+from bundlegraph.interpretation import ProviderNotConfigured, configured_provider
 
 
 def _frontend_directory(environ: dict[str, str] | None = None) -> Path:
@@ -28,6 +29,14 @@ def _frontend_directory(environ: dict[str, str] | None = None) -> Path:
     if not directory.is_dir() or not (directory / "index.html").is_file():
         raise RuntimeError(f"frontend build not found in {directory}")
     return directory
+
+
+def _configured_extraction_provider():
+    """Return the optional live extractor without weakening fail-closed startup."""
+    try:
+        return configured_provider()
+    except ProviderNotConfigured:
+        return None
 
 
 def build_demo_app() -> "FastAPI":  # noqa: F821 -- forward reference for lazy FastAPI import
@@ -64,14 +73,22 @@ def build_application_app() -> "FastAPI":  # noqa: F821
     catalogs = PostgresCatalogRepository(settings.database_url)
     ownership = PostgresResourceOwnershipRepository(settings.database_url)
     identities = {token_hash: Identity(subject=record["subject"], roles=frozenset(record.get("roles", []))) for token_hash, record in settings.auth_identities.items()}
-    auth = ConfiguredBearerAuthenticationProvider(identities)
+    auth = (
+        OidcIntrospectionAuthenticationProvider(
+            settings.oidc_introspection_url, settings.oidc_client_id or "", settings.oidc_client_secret or "",
+            expected_audience=settings.oidc_audience,
+        )
+        if settings.oidc_introspection_url
+        else ConfiguredBearerAuthenticationProvider(identities)
+    )
     paypal = PayPalAdapter(DisabledPayPalClient(), settings.sandbox_recipients)
     service = ApplicationService(plans=plans, approvals=approvals, payments=payments, webhook_events=webhooks, evidence_reader=evidence_reader, paypal=paypal)
     database_ready = postgres_ready(settings.database_url)
     catalog_ready = database_ready and catalogs.get_active() is not None
     channel3_key = os.getenv("CHANNEL3_API_KEY", "").strip()
     discovery = Channel3CandidateDiscovery(Channel3DiscoveryAdapter.from_api_key(channel3_key)) if channel3_key else CatalogCandidateDiscovery(catalogs)
-    return build_app(service, evidence_reader, planning, readiness={"persistence": database_ready, "authentication": True, "catalog": catalog_ready, "candidate_provider": bool(channel3_key), "paypal": False, "webhook_verifier": False}, allowed_origins=frontend_origins(), authentication_provider=auth, ownership=ownership, requirement_drafts=drafts, catalog_repository=catalogs, frontend_directory=str(_frontend_directory()), runtime_name="application", candidate_discovery=discovery)
+    extraction_provider = _configured_extraction_provider()
+    return build_app(service, evidence_reader, planning, readiness={"persistence": database_ready, "authentication": True, "catalog": catalog_ready, "candidate_provider": bool(channel3_key), "model_provider": extraction_provider is not None, "paypal": False, "webhook_verifier": False}, allowed_origins=frontend_origins(), authentication_provider=auth, ownership=ownership, requirement_drafts=drafts, catalog_repository=catalogs, extraction_provider=extraction_provider, frontend_directory=str(_frontend_directory()), runtime_name="application", candidate_discovery=discovery)
 
 
 def build_production_app() -> "FastAPI":  # noqa: F821
