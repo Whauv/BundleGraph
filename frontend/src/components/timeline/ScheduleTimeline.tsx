@@ -8,12 +8,12 @@ interface ScheduleTimelineProps {
 
 export const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({ deadlineDays = 7, isDelayed = false }) => {
   const steps = [
-    { name: 'Order Authorized', day: 'DAY 0 (NOW)', desc: 'PayPal Sandbox payment confirmed', status: 'done', icon: CheckCircle2, progress: 100 },
-    { name: 'Merchant Dispatch', day: 'DAY 1', desc: 'Hardware package picked & labeled', status: 'done', icon: Package, progress: 75 },
-    { name: 'Carrier In Transit', day: isDelayed ? 'DAYS 2–4' : 'DAYS 2–3', desc: isDelayed ? 'Expedited alternative rerouted' : 'Ground transit on schedule', status: isDelayed ? 'warn' : 'active', icon: Truck, progress: 35 },
-    { name: 'Studio Delivery', day: isDelayed ? 'DAY 4' : 'DAY 3', desc: 'All packages arrive at facility', status: 'upcoming', icon: Clock, progress: 0 },
-    { name: 'Assembly & Soundcheck', day: isDelayed ? 'DAY 5' : 'DAY 4', desc: 'Cabling, gain staging & sound check', status: 'upcoming', icon: Mic, progress: 0 },
-    { name: 'Production Launch', day: `DAY ${deadlineDays} (TARGET)`, desc: 'Live recording episode 1 date', status: 'deadline', icon: Flag, progress: 0 },
+    { name: 'Plan Approval', day: 'UNKNOWN', desc: 'Authoritative approval has not been supplied to this timeline.', status: 'unknown', icon: CheckCircle2, progress: 0 },
+    { name: 'Merchant Dispatch', day: 'UNKNOWN', desc: 'No merchant dispatch evidence is available.', status: 'unknown', icon: Package, progress: 0 },
+    { name: 'Carrier Transit', day: 'UNKNOWN', desc: 'No carrier estimate or tracking evidence is available.', status: 'unknown', icon: Truck, progress: 0 },
+    { name: 'Studio Delivery', day: 'UNKNOWN', desc: 'Arrival feasibility remains unknown without delivery evidence.', status: 'unknown', icon: Clock, progress: 0 },
+    { name: 'Assembly & Soundcheck', day: 'USER PLANNED', desc: 'Schedule this only after delivery is confirmed.', status: 'unknown', icon: Mic, progress: 0 },
+    { name: 'Production Launch', day: `DAY ${deadlineDays} (TARGET)`, desc: 'User target only; this is not an arrival promise.', status: 'deadline', icon: Flag, progress: 0 },
   ];
 
   return (
@@ -33,18 +33,9 @@ export const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({ deadlineDays
             </p>
           </div>
         </div>
-        <div className={`badge ${isDelayed ? 'badge-amber' : 'badge-emerald'}`}>
-          {isDelayed ? (
-            <>
-              <AlertCircle size={12} />
-              <span>+1 Day Re-planning Shift (Feasible)</span>
-            </>
-          ) : (
-            <>
-              <CheckCircle2 size={12} />
-              <span>On Schedule (+2 Days Buffer)</span>
-            </>
-          )}
+        <div className="badge badge-amber">
+          <AlertCircle size={12} />
+          <span>{isDelayed ? 'Recovery delivery unknown' : 'Delivery feasibility unknown'}</span>
         </div>
       </div>
 
@@ -109,11 +100,11 @@ export const ScheduleTimeline: React.FC<ScheduleTimelineProps> = ({ deadlineDays
       <div style={{ marginTop: '0.625rem', paddingTop: '0.5rem', borderTop: '1px solid #1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', color: '#777777' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
           <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ffffff', display: 'inline-block' }}></span>
-          <span>Bryntum Project Timeline Protocol • Sponsor Integration</span>
+          <span>Illustrative milestone view • No live delivery provider configured</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span>Deterministic Buffer:</span>
-          <span style={{ color: '#00e575', fontWeight: 600 }}>Soundcheck completed 48 hours prior to launch</span>
+          <span>Deadline policy:</span>
+          <span style={{ color: '#fabc45', fontWeight: 600 }}>Unknown is never presented as arrives-by</span>
         </div>
       </div>
     </section>

@@ -368,8 +368,8 @@ export const RequestBuilder: React.FC = () => {
             Extracting typed constraints into solver adjacency matrix with continuous validation.
           </p>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', marginTop: '0.25rem', borderTop: '1px solid #1e1e1e', paddingTop: '0.35rem' }}>
-            <span style={{ color: '#666666' }}>Parser: <strong style={{ color: '#ffffff' }}>RegexLexer+LLM</strong></span>
-            <span style={{ color: '#00e575' }}>CONF: 0.994</span>
+            <span style={{ color: '#666666' }}>Parser: <strong style={{ color: '#ffffff' }}>Schema-validated provider</strong></span>
+            <span style={{ color: '#fabc45' }}>USER_REVIEW_REQUIRED</span>
           </div>
         </div>
 
@@ -383,11 +383,11 @@ export const RequestBuilder: React.FC = () => {
             Port Topology Matrix
           </div>
           <p style={{ fontSize: '0.75rem', color: '#888888', margin: '0.2rem 0' }}>
-            Matching host bus compatibility (Type-C to Type-C bus power minimum 5V 3A).
+            Matching confirmed connector facts. Electrical and bus-power support remain unknown without evidence.
           </p>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', marginTop: '0.25rem', borderTop: '1px solid #1e1e1e', paddingTop: '0.35rem' }}>
-            <span style={{ color: '#666666' }}>Bus Power: <strong style={{ color: '#ffffff' }}>Compliant</strong></span>
-            <span style={{ color: '#ffffff' }}>15W OK</span>
+            <span style={{ color: '#666666' }}>Bus Power: <strong style={{ color: '#fabc45' }}>Unknown</strong></span>
+            <span style={{ color: '#fabc45' }}>EVIDENCE_REQUIRED</span>
           </div>
         </div>
 
@@ -395,17 +395,17 @@ export const RequestBuilder: React.FC = () => {
         <div className="surface-panel" style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.625rem', textTransform: 'uppercase', color: '#666666' }}>
             <span>Settlement Assurance</span>
-            <span style={{ color: '#ffffff' }}>PAYPAL_V2</span>
+            <span style={{ color: '#ffffff' }}>PAYPAL_SANDBOX</span>
           </div>
           <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#ffffff' }}>
-            Atomic Escrow Pre-check
+            Plan-bound Authorization Boundary
           </div>
           <p style={{ fontSize: '0.75rem', color: '#888888', margin: '0.2rem 0' }}>
-            Validating merchant capture routes against ${(budgetDollars).toFixed(2)} minor unit authorization.
+            Payment remains disabled until the exact persisted plan version and amount receive authoritative approval.
           </p>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', marginTop: '0.25rem', borderTop: '1px solid #1e1e1e', paddingTop: '0.35rem' }}>
-            <span style={{ color: '#666666' }}>Vault Status: <strong style={{ color: '#ffffff' }}>Ready</strong></span>
-            <span style={{ color: '#00e575' }}>SANDBOX_LIVE</span>
+            <span style={{ color: '#666666' }}>Payment Status: <strong style={{ color: '#ffffff' }}>Not authorized</strong></span>
+            <span style={{ color: '#fabc45' }}>APPROVAL_REQUIRED</span>
           </div>
         </div>
       </div>

@@ -100,7 +100,7 @@ export const BundleGrid: React.FC<BundleGridProps> = ({ proposal }) => {
 
   return (
     <div style={{ width: '100%', marginTop: '0.25rem' }}>
-      <div className="ag-theme-quartz-dark" style={{ height: 320, width: '100%', borderRadius: '2px', overflow: 'hidden', border: '1px solid #222222' }}>
+      <div className="ag-theme-quartz-dark" style={{ height: 320, width: '100%', borderRadius: 'var(--radius-sm)', overflow: 'hidden', border: '1px solid var(--border-default)' }}>
         <AgGridReact
           theme="legacy"
           rowData={rowData}
@@ -111,17 +111,17 @@ export const BundleGrid: React.FC<BundleGridProps> = ({ proposal }) => {
           }}
         />
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem', padding: '0.4rem 0.75rem', backgroundColor: '#141414', border: '1px solid #222222', borderRadius: '2px', fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', color: '#888888' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem', padding: '0.5rem 0.875rem', backgroundColor: 'var(--bg-card-subtle)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          <Table size={12} style={{ color: '#ffffff' }} />
-          <span>AG Grid Community Matrix • Sponsor Integration</span>
+          <Table size={13} style={{ color: 'var(--text-primary)' }} />
+          <span>AG Grid Community Matrix • Hardware Line Items</span>
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <span>{proposal.line_items.length} line items</span>
           <span>•</span>
           <span>Single Currency (USD)</span>
           <span>•</span>
-          <span style={{ color: '#00e575', fontWeight: 600 }}>Integer Cents Verified</span>
+          <span style={{ color: 'var(--status-emerald)', fontWeight: 600 }}>Integer Cents Verified</span>
         </div>
       </div>
     </div>
