@@ -1,5 +1,5 @@
 import type {
-  ApiFailure, ApprovalRecord, AuthoritativePlan, BundleProposal, ConfirmedRequirements,
+  ApiFailure, ApprovalRecord, AuthoritativePlan, BundleProposal, ConfirmedRequirements, DraftRequirements,
   EvidenceRecord, ExecutionRecord, PresetScenario, ReplanResult, RequirementInterpretation,
 } from '../types/bundlegraph';
 import { OFFLINE_PRESETS, SAMPLE_CONFIRMED_REQ, SAMPLE_INTERPRETATION, SAMPLE_PROPOSAL, SAMPLE_REPLAN_RESULT } from '../fixtures/offlineData';
@@ -9,6 +9,7 @@ const configuredRuntime = import.meta.env.VITE_BUNDLEGRAPH_RUNTIME?.trim();
 const configuredBase = import.meta.env.VITE_BUNDLEGRAPH_API_BASE?.trim();
 const API_BASE = configuredBase ? configuredBase.replace(/\/$/, '') : '';
 const OBSERVABILITY_ENDPOINT = import.meta.env.VITE_BUNDLEGRAPH_OBSERVABILITY_ENDPOINT?.trim();
+let fixtureGuidedDraft: DraftRequirements | null = null;
 
 export type FrontendRuntimeMode = 'fixture' | 'authoritative';
 export const frontendRuntime = {
@@ -59,7 +60,10 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     const reason = typeof nested === 'object' && nested !== null && 'reason_code' in nested
       ? String((nested as { reason_code: unknown }).reason_code)
       : response.status === 409 ? 'STALE_RESOURCE_VERSION' : `HTTP_${response.status}`;
-    const message = typeof nested === 'string' ? nested : JSON.stringify(nested);
+    const missing = typeof nested === 'object' && nested !== null && 'missing_information' in nested && Array.isArray((nested as { missing_information: unknown }).missing_information)
+      ? (nested as { missing_information: unknown[] }).missing_information.map(String)
+      : [];
+    const message = typeof nested === 'string' ? nested : missing.length ? `Please resolve: ${missing.join(', ')}.` : response.statusText || 'The request could not be completed.';
     const error = new ApiError(response.status, reason, message || response.statusText, responseCorrelation);
     reportFailure(error, endpoint);
     throw error;
@@ -80,12 +84,27 @@ export const api = {
   },
 
   async saveGuidedDraft(params: { request_reference: string; use_case: string; participants: number; budget_minor: number; currency: string; laptop_connectors: string[]; monitoring: string; deadline?: string }): Promise<{ draft: RequirementInterpretation['draft']; version: number; clarification_questions: string[]; can_confirm: boolean }> {
-    if (frontendRuntime.mode === 'fixture') return { draft: cloneFixture(SAMPLE_INTERPRETATION.draft), version: 1, clarification_questions: [], can_confirm: true };
+    if (frontendRuntime.mode === 'fixture') {
+      const listening = ({ independent: 'independent_headphones', shared: 'shared_headphones', none: 'no_monitoring' } as Record<string, string>)[params.monitoring] || null;
+      const missing = [params.use_case !== 'two-person podcast' ? 'supported use case' : null, params.participants !== 2 ? 'supported participant topology' : null, params.budget_minor <= 0 ? 'budget' : null, params.laptop_connectors.includes('unknown') ? 'laptop connector' : null, !listening ? 'monitoring requirement' : null].filter((item): item is string => Boolean(item));
+      fixtureGuidedDraft = {
+        request_reference: params.request_reference, use_case: params.use_case, participants: params.participants,
+        budget: { amount_minor: params.budget_minor, currency: params.currency },
+        required_quantities: [{ category: 'microphone', quantity: params.participants }, { category: 'audio_interface', quantity: 1 }, { category: 'xlr_cable', quantity: params.participants }, { category: 'headphones', quantity: params.participants }],
+        laptop_connectors: params.laptop_connectors.filter((item) => item !== 'unknown').map((connector) => ({ connector })),
+        listening_requirement: listening, deadline: params.deadline || null, missing_information: missing,
+      };
+      return { draft: cloneFixture(fixtureGuidedDraft), version: 2, clarification_questions: missing.map((item) => `Please resolve ${item}.`), can_confirm: !missing.length };
+    }
     return request('/requirement-drafts/guided', { method: 'POST', body: JSON.stringify(params) });
   },
 
   async confirmDraft(requestReference: string, expectedVersion: number): Promise<ConfirmedRequirements> {
-    if (frontendRuntime.mode === 'fixture') return cloneFixture(SAMPLE_CONFIRMED_REQ);
+    if (frontendRuntime.mode === 'fixture') {
+      const draft = fixtureGuidedDraft;
+      if (!draft || draft.request_reference !== requestReference || draft.missing_information.length || !draft.use_case || draft.participants === null || !draft.budget || !draft.listening_requirement) return cloneFixture(SAMPLE_CONFIRMED_REQ);
+      return { request_reference: draft.request_reference, confirmation_reference: `fixture-confirmed-v${expectedVersion}`, use_case: draft.use_case, participants: draft.participants, budget: draft.budget, required_quantities: draft.required_quantities, laptop_connectors: draft.laptop_connectors, listening_requirement: draft.listening_requirement, deadline: draft.deadline || null };
+    }
     const response = await request<{ confirmation_reference: string; requirements: ConfirmedRequirements }>(`/requirement-drafts/${encodeURIComponent(requestReference)}/confirm`, { method: 'POST', body: JSON.stringify({ expected_version: expectedVersion }) });
     return response.requirements;
   },
@@ -130,5 +149,5 @@ export const api = {
       : { execution_status: 'COMPLETED', transaction_id: 'fixture-transaction-v1', plan_id: params.plan_id, amount_minor: params.amount_minor, currency: params.currency, settled_at: '2026-01-01T00:00:00Z', approval_id: params.approval_id, message: 'Synthetic fixture execution completed. No payment provider was called.' };
   },
 
-  async resetDemo(): Promise<void> { return; },
+  async resetDemo(): Promise<void> { fixtureGuidedDraft = null; },
 };
