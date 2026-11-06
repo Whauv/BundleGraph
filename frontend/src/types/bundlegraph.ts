@@ -233,10 +233,30 @@ export type WorkflowOperation =
   | 'confirm'
   | 'generate'
   | 'persist'
+  | 'evidence'
   | 'approve'
   | 'execute'
   | 'replan'
   | 'reset';
+
+export type SearchResultStatus =
+  | 'idle'
+  | 'loading'
+  | 'candidates'
+  | 'infeasible'
+  | 'blocked'
+  | 'failed'
+  | 'stale';
+
+export interface SearchResultState {
+  status: SearchResultStatus;
+  backend_status?: string;
+  reason_codes: string[];
+  infeasibility?: BundleSelectionResult['infeasibility'];
+  result_revision: number;
+}
+
+export type EvidenceLoadStatus = 'idle' | 'loading' | 'loaded' | 'failed';
 
 export interface ApiFailure {
   status: number;

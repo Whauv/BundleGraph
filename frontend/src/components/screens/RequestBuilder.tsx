@@ -1,6 +1,7 @@
 import React from 'react';
 import { ArrowRight, CalendarDays, CircleHelp, Headphones, Laptop, Sparkles, Users } from 'lucide-react';
 import { useDemo } from '../../store/demoStore';
+import { dollarsToMinorUnits } from '../../utils/money';
 
 export const RequestBuilder: React.FC = () => {
   const {
@@ -16,14 +17,14 @@ export const RequestBuilder: React.FC = () => {
       <div className="starter-row"><span>Supported example</span><button type="button" onClick={() => example && void loadPreset(example)}>Two-person podcast</button><button type="button" className="btn-ghost" onClick={() => example && void loadPreset(example)}>Load example</button></div>
       <div className="form-section"><div className="section-heading"><div><p className="eyebrow">Explicit details</p><h2>Planning constraints</h2></div></div>
         <div className="structured-inputs">
-          <label htmlFor="budget"><span className="field-label">Budget</span><div className="currency-input"><span aria-hidden="true">$</span><input id="budget" type="number" min="1" step="1" value={budgetDollars} onChange={(event) => setBudgetDollars(Number(event.target.value))} required /></div><small>Equipment budget in USD.</small></label>
-          <label htmlFor="participants"><span className="field-label"><Users size={16} /> Participants</span><select id="participants" value={participants} onChange={(event) => setParticipants(Number(event.target.value))}><option value={2}>Two people</option></select><small>The verified initial domain currently supports exactly two participants.</small></label>
+          <label htmlFor="budget"><span className="field-label">Budget</span><div className="currency-input"><span aria-hidden="true">$</span><input id="budget" type="number" min="0.01" max="1000000" step="0.01" value={budgetDollars} onChange={(event) => setBudgetDollars(event.target.valueAsNumber)} required aria-invalid={dollarsToMinorUnits(budgetDollars) === null} /></div><small>Equipment budget in USD, with at most two decimal places.</small></label>
+          <label htmlFor="participants"><span className="field-label"><Users size={16} /> Participants</span><select id="participants" value={participants} onChange={(event) => setParticipants(Number(event.target.value))}><option value={1}>One person</option><option value={2}>Two people</option><option value={3}>Three people</option></select><small>The verified initial domain currently supports exactly two participants; other values remain unresolved.</small></label>
           <label htmlFor="connector"><span className="field-label"><Laptop size={16} /> Laptop connection</span><select id="connector" value={laptopConnector} onChange={(event) => setLaptopConnector(event.target.value)}><option value="usb-c">USB-C</option><option value="usb-a">USB-A</option><option value="unknown">I’m not sure</option></select><small>USB-C is not treated as proof of Thunderbolt compatibility.</small></label>
           <label htmlFor="monitoring"><span className="field-label"><Headphones size={16} /> Headphone monitoring</span><select id="monitoring" value={listeningRequirement} onChange={(event) => setListeningRequirement(event.target.value)}><option value="independent_headphones">Separate headphone monitoring</option><option value="shared_headphones">Shared headphone listening</option><option value="no_monitoring">No monitoring required</option><option value="unknown">I’m not sure</option></select><small>Choose separate monitoring when each person needs their own output.</small></label>
           <label htmlFor="target-date"><span className="field-label"><CalendarDays size={16} /> Recording target <em>Optional</em></span><input id="target-date" type="date" value={deadlineDate} onChange={(event) => setDeadlineDate(event.target.value)} /><small>A target date is not a delivery promise. Delivery stays unknown without evidence.</small></label>
         </div>
       </div>
-      <div className="action-bar"><p className="quiet-note"><CircleHelp size={16} /> The next step reviews a draft. No bundle has been validated yet.</p><button className="btn-primary" type="submit" disabled={isLoading || !promptText.trim() || budgetDollars <= 0}>{isLoading ? 'Preparing requirements…' : <>Review requirements <ArrowRight size={17} /></>}</button></div>
+      <div className="action-bar"><p className="quiet-note"><CircleHelp size={16} /> The next step reviews a draft. No bundle has been validated yet.</p><button className="btn-primary" type="submit" disabled={isLoading || !promptText.trim() || dollarsToMinorUnits(budgetDollars) === null}>{isLoading ? 'Preparing requirements…' : <>Review requirements <ArrowRight size={17} /></>}</button></div>
     </form>
   </div>;
 };

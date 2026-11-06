@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const fixtureSource = await readFile(new URL('../src/fixtures/offlineData.ts', import.meta.url), 'utf8');
 const clientSource = await readFile(new URL('../src/api/client.ts', import.meta.url), 'utf8');
+const fixtureAdapterSource = await readFile(new URL('../src/api/fixtureAdapter.ts', import.meta.url), 'utf8');
 
 test('offline data is explicitly synthetic and preserves evidence references', () => {
   assert.match(fixtureSource, /fixture/i);
@@ -12,10 +13,10 @@ test('offline data is explicitly synthetic and preserves evidence references', (
 });
 
 test('fixture approval and execution IDs are stable and visibly labeled', () => {
-  assert.match(clientSource, /fixture-approval-v1/);
-  assert.match(clientSource, /SIMULATED_FIXTURE_APPROVAL/);
-  assert.match(clientSource, /fixture-transaction-v1/);
-  assert.doesNotMatch(clientSource, /Math\.random/);
+  assert.match(fixtureAdapterSource, /fixture-approval-v1/);
+  assert.match(fixtureAdapterSource, /SIMULATED_FIXTURE_APPROVAL/);
+  assert.match(fixtureAdapterSource, /fixture-transaction-v1/);
+  assert.doesNotMatch(fixtureAdapterSource, /Math\.random/);
 });
 
 test('browser configuration contains no credential variables', () => {

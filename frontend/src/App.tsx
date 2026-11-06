@@ -13,8 +13,8 @@ const PlanApproval = lazy(() => import('./components/screens/PlanApproval').then
 const ExecutionRecovery = lazy(() => import('./components/screens/ExecutionRecovery').then((module) => ({ default: module.ExecutionRecovery })));
 
 function preferredTheme(): Theme {
-  const saved = localStorage.getItem('bundlegraph.theme');
-  if (saved === 'light' || saved === 'dark') return saved;
+  try { const saved = localStorage.getItem('bundlegraph.theme'); if (saved === 'light' || saved === 'dark') return saved; }
+  catch { /* System preference remains usable when storage is blocked. */ }
   return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 }
 
@@ -75,7 +75,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
-    localStorage.setItem('bundlegraph.theme', theme);
+    try { localStorage.setItem('bundlegraph.theme', theme); } catch { /* Theme still applies for this page. */ }
   }, [theme]);
   return <MotionConfig reducedMotion="user" transition={{ duration: 0.16, ease: 'easeOut' }}>
     <AuthGate><DemoProvider><Workspace theme={theme} onToggleTheme={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')} /></DemoProvider></AuthGate>

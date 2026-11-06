@@ -26,6 +26,7 @@ from bundlegraph.selection import BundleProposal, TotalStatus
 from .ids import new_id, plan_version_fingerprint
 from .paypal import PayPalAdapter, PayPalResult, PayPalResultStatus
 from .persistence import (
+    ApplicationMutationRepository,
     ApprovalRepository,
     EvidenceReader,
     PaymentRepository,
@@ -51,7 +52,11 @@ from .state import (
 
 
 class ApplicationError(Exception):
-    """Raised for invalid caller input (unknown plan, mismatched version, etc.)."""
+    """Typed domain rejection safe to map at the HTTP boundary."""
+
+    def __init__(self, message: str, reason_code: str = "DOMAIN_REJECTED") -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +66,8 @@ class CreatePlanInput:
     proposal: BundleProposal
     merchant_lookup: dict[str, str]  # offer_id -> merchant_reference (from Member 1 catalog)
     evidence: tuple[Evidence, ...] = ()
+    creation_idempotency_key: str | None = None
+    owner_subject: str = "test-user"
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +78,7 @@ class ApplyReplanInput:
     correlation_id: str
     merchant_lookup: dict[str, str]
     evidence: tuple[Evidence, ...] = ()
+    expected_plan_version: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +100,7 @@ class ApplicationService:
         webhook_events: WebhookEventRepository,
         evidence_reader: EvidenceReader,
         paypal: PayPalAdapter,
+        mutations: ApplicationMutationRepository | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._plans = plans
@@ -100,6 +109,7 @@ class ApplicationService:
         self._webhook_events = webhook_events
         self._evidence_reader = evidence_reader
         self._paypal = paypal
+        self._mutations = mutations
         self._now = now
 
     # ------------------------------------------------------------------
@@ -108,6 +118,21 @@ class ApplicationService:
 
     def create_plan(self, data: CreatePlanInput) -> Plan:
         line_items, total, allocations = self._line_items_from_proposal(data.proposal, data.merchant_lookup)
+        creation_fingerprint = plan_version_fingerprint({
+            "owner_subject": data.owner_subject,
+            "confirmation_reference": data.confirmation_reference,
+            "proposal_key": data.proposal.proposal_key,
+            "line_items": [item.model_dump(mode="json") for item in line_items],
+            "total": total.model_dump(mode="json"),
+        })
+        scoped_creation_key = None
+        if data.creation_idempotency_key:
+            scoped_creation_key = plan_version_fingerprint({"owner_subject": data.owner_subject, "idempotency_key": data.creation_idempotency_key})
+            existing = self._plans.get_by_creation_key(scoped_creation_key)
+            if existing is not None:
+                if existing.creation_request_fingerprint != creation_fingerprint:
+                    raise ApplicationError("plan creation key was reused with different authoritative inputs", "IDEMPOTENCY_MISMATCH")
+                return existing
         plan_id = new_id("plan")
         version_payload = _plan_version_payload(
             plan_id=plan_id,
@@ -139,7 +164,16 @@ class ApplicationService:
             updated_at=now,
             current_version=1,
             versions=[version],
+            creation_idempotency_key=scoped_creation_key,
+            creation_request_fingerprint=creation_fingerprint if data.creation_idempotency_key else None,
         )
+        if self._mutations is not None:
+            try:
+                return self._mutations.create_plan(plan, data.evidence, data.owner_subject)
+            except ValueError as exc:
+                if str(exc) == "IDEMPOTENCY_MISMATCH":
+                    raise ApplicationError("plan creation key was reused with different authoritative inputs", "IDEMPOTENCY_MISMATCH") from exc
+                raise
         self._plans.save(plan)
         if data.evidence:
             self._evidence_reader.put(plan_id, data.evidence)
@@ -167,14 +201,14 @@ class ApplicationService:
         if head.version != data.plan_version:
             raise ApplicationError(
                 f"plan {plan.plan_id} is at version {head.version}; approval targets {data.plan_version}",
+                "STALE_PLAN_VERSION",
             )
         if head.fingerprint != data.plan_fingerprint:
-            raise ApplicationError("plan fingerprint does not match current version")
+            raise ApplicationError("plan fingerprint does not match current version", "STALE_PLAN_FINGERPRINT")
         if data.permitted_total.currency != head.total.currency:
-            raise ApplicationError("permitted_total currency must match the plan total")
-        if data.permitted_total.amount_minor < head.total.amount_minor:
-            raise ApplicationError("permitted_total is below the plan total")
-        self._revoke_prior_approvals(plan.plan_id, head.version)
+            raise ApplicationError("permitted_total currency must match the plan total", "APPROVAL_CURRENCY_MISMATCH")
+        if data.permitted_total.amount_minor != head.total.amount_minor:
+            raise ApplicationError("permitted_total must equal the exact plan total", "APPROVAL_AMOUNT_MISMATCH")
         if plan.status not in {PlanStatus.PROPOSED, PlanStatus.AWAITING_APPROVAL}:
             raise ApplicationError(f"plan status {plan.status} does not accept new approval")
         now = self._now()
@@ -183,7 +217,6 @@ class ApplicationService:
         ensure_plan_transition(plan.status, PlanStatus.APPROVED)
         plan.status = PlanStatus.APPROVED
         plan.updated_at = now
-        self._plans.save(plan)
         approval = Approval(
             approval_id=new_id("appr"),
             plan_id=plan.plan_id,
@@ -194,15 +227,29 @@ class ApplicationService:
             actor_reference=data.actor_reference,
             permitted_total=data.permitted_total,
         )
-        self._approvals.save(approval)
+        invalidated = self._invalidated_prior_approvals(plan.plan_id, head.version)
+        if self._mutations is not None:
+            try:
+                self._mutations.grant_approval(plan, approval, invalidated)
+            except ValueError as exc:
+                if str(exc) == "STALE_PLAN_VERSION":
+                    raise ApplicationError("plan version changed while granting approval", "STALE_PLAN_VERSION") from exc
+                raise
+        else:
+            self._plans.save(plan)
+            for prior in invalidated:
+                self._approvals.save(prior)
+            self._approvals.save(approval)
         return approval
 
-    def _revoke_prior_approvals(self, plan_id: str, current_version: int) -> None:
+    def _invalidated_prior_approvals(self, plan_id: str, current_version: int) -> tuple[Approval, ...]:
+        invalidated: list[Approval] = []
         for approval in self._approvals.list_for_plan(plan_id):
             if approval.status is ApprovalStatus.GRANTED and approval.plan_version != current_version:
                 approval.status = ApprovalStatus.INVALIDATED
                 approval.revoked_at = self._now()
-                self._approvals.save(approval)
+                invalidated.append(approval)
+        return tuple(invalidated)
 
     # ------------------------------------------------------------------
     # Payments
@@ -215,9 +262,6 @@ class ApplicationService:
         operation_id: str,
         merchant_allocation_id: str,
     ) -> PaymentOperation:
-        existing = self._payments.get(operation_id)
-        if existing is not None:
-            return self.reconcile_payment(operation_id)
         approval = self._require_granted_approval(approval_id)
         plan = self._require_plan(approval.plan_id)
         head = plan.head()
@@ -231,14 +275,6 @@ class ApplicationService:
         )
         if allocation is None:
             raise ApplicationError("merchant_allocation_id does not belong to the current plan version")
-        if any(
-            item.plan_version == head.version
-            and item.kind is PaymentOperationKind.AUTHORIZE
-            and item.merchant_allocation_id == allocation.allocation_id
-            and item.status in {PaymentOperationStatus.SUBMITTED, PaymentOperationStatus.UNCERTAIN, PaymentOperationStatus.SUCCEEDED}
-            for item in self._payments.list_for_plan(plan.plan_id)
-        ):
-            raise ApplicationError("merchant allocation already has an active or successful authorization")
         now = self._now()
         operation = PaymentOperation(
             operation_id=operation_id,
@@ -253,9 +289,9 @@ class ApplicationService:
             merchant_allocation_id=allocation.allocation_id,
             submitted_at=now,
         )
-        operation, created = self._payments.create_if_absent(operation)
+        operation, created = self._reserve_operation(operation)
         if not created:
-            return operation
+            return self.reconcile_payment(operation_id)
         if plan.status is PlanStatus.APPROVED:
             ensure_plan_transition(plan.status, PlanStatus.EXECUTING)
             plan.status = PlanStatus.EXECUTING
@@ -274,18 +310,8 @@ class ApplicationService:
         parent_operation_id: str,
         operation_id: str,
     ) -> PaymentOperation:
-        existing = self._payments.get(operation_id)
-        if existing is not None:
-            return self.reconcile_payment(operation_id)
         parent = self._require_succeeded_authorization(parent_operation_id)
-        approval = self._require_granted_approval(parent.approval_id)
-        if any(
-            item.kind is PaymentOperationKind.CAPTURE
-            and item.parent_operation_id == parent.operation_id
-            and item.status in {PaymentOperationStatus.SUBMITTED, PaymentOperationStatus.UNCERTAIN, PaymentOperationStatus.SUCCEEDED}
-            for item in self._payments.list_for_plan(parent.plan_id)
-        ):
-            raise ApplicationError("authorization already has an active or successful capture")
+        self._require_granted_approval(parent.approval_id)
         now = self._now()
         operation = PaymentOperation(
             operation_id=operation_id,
@@ -301,9 +327,9 @@ class ApplicationService:
             parent_operation_id=parent.operation_id,
             submitted_at=now,
         )
-        operation, created = self._payments.create_if_absent(operation)
+        operation, created = self._reserve_operation(operation)
         if not created:
-            return operation
+            return self.reconcile_payment(operation_id)
         result = self._paypal.capture(
             operation_id=operation_id,
             authorization_reference=parent.provider_reference or "",
@@ -320,9 +346,6 @@ class ApplicationService:
         return completed
 
     def void_authorization(self, *, parent_operation_id: str, operation_id: str) -> PaymentOperation:
-        existing = self._payments.get(operation_id)
-        if existing is not None:
-            return self.reconcile_payment(operation_id)
         parent = self._require_succeeded_authorization(parent_operation_id)
         now = self._now()
         operation = PaymentOperation(
@@ -339,9 +362,9 @@ class ApplicationService:
             parent_operation_id=parent.operation_id,
             submitted_at=now,
         )
-        operation, created = self._payments.create_if_absent(operation)
+        operation, created = self._reserve_operation(operation)
         if not created:
-            return operation
+            return self.reconcile_payment(operation_id)
         result = self._paypal.void(
             operation_id=operation_id,
             authorization_reference=parent.provider_reference or "",
@@ -355,21 +378,9 @@ class ApplicationService:
         operation_id: str,
         amount: Money,
     ) -> PaymentOperation:
-        existing = self._payments.get(operation_id)
-        if existing is not None:
-            return self.reconcile_payment(operation_id)
         parent = self._require_succeeded_capture(parent_operation_id)
         if amount.currency != parent.amount.currency or amount.amount_minor > parent.amount.amount_minor:
             raise ApplicationError("refund amount is not consistent with the capture")
-        reserved_refunds = sum(
-            item.amount.amount_minor
-            for item in self._payments.list_for_plan(parent.plan_id)
-            if item.kind is PaymentOperationKind.REFUND
-            and item.parent_operation_id == parent.operation_id
-            and item.status in {PaymentOperationStatus.SUBMITTED, PaymentOperationStatus.UNCERTAIN, PaymentOperationStatus.SUCCEEDED}
-        )
-        if reserved_refunds + amount.amount_minor > parent.amount.amount_minor:
-            raise ApplicationError("refund amount exceeds the remaining captured amount")
         now = self._now()
         operation = PaymentOperation(
             operation_id=operation_id,
@@ -385,9 +396,9 @@ class ApplicationService:
             parent_operation_id=parent.operation_id,
             submitted_at=now,
         )
-        operation, created = self._payments.create_if_absent(operation)
+        operation, created = self._reserve_operation(operation, capacity_minor=parent.amount.amount_minor)
         if not created:
-            return operation
+            return self.reconcile_payment(operation_id)
         result = self._paypal.refund(
             operation_id=operation_id,
             capture_reference=parent.provider_reference or "",
@@ -415,13 +426,37 @@ class ApplicationService:
             return False
         recorded = self._webhook_events.record_if_new(event)
         if not recorded:
-            return False
+            stored = self._webhook_events.get(event.event_id)
+            if stored is None:
+                return False
+            if stored.raw_payload_fingerprint != event.raw_payload_fingerprint:
+                raise ApplicationError("webhook event_id was reused with a different body", "WEBHOOK_REPLAY_CONFLICT")
+            if stored.processed_at is not None:
+                return False
+            event = stored
         if event.operation_id is None:
+            event.processing_error_code = "OPERATION_REFERENCE_MISSING"
+            self._webhook_events.save(event)
             return True
         operation = self._payments.get(event.operation_id)
         if operation is None:
+            event.processing_error_code = "OPERATION_NOT_FOUND"
+            self._webhook_events.save(event)
+            return True
+        if event.resource_reference not in {operation.provider_reference, operation.operation_id}:
+            event.processing_error_code = "RESOURCE_REFERENCE_MISMATCH"
+            event.processed_at = self._now()
+            self._webhook_events.save(event)
+            return True
+        if not _webhook_kind_matches(operation.kind, event.event_type):
+            event.processing_error_code = "EVENT_KIND_MISMATCH"
+            event.processed_at = self._now()
+            self._webhook_events.save(event)
             return True
         self._apply_webhook_to_operation(operation, event)
+        event.processed_at = self._now()
+        event.processing_error_code = None
+        self._webhook_events.save(event)
         return True
 
     def _apply_webhook_to_operation(self, operation: PaymentOperation, event: WebhookEvent) -> None:
@@ -438,6 +473,7 @@ class ApplicationService:
         operation.settled_at = event.received_at
         operation.last_webhook_event_id = event.event_id
         self._payments.save(operation)
+        self._refresh_plan_after_payment(operation)
 
     # ------------------------------------------------------------------
     # Supersession from Member 1 replan
@@ -445,8 +481,13 @@ class ApplicationService:
 
     def apply_replan(self, data: ApplyReplanInput) -> Plan:
         plan = self._require_plan(data.plan_id)
+        if data.expected_plan_version is not None and plan.current_version != data.expected_plan_version:
+            raise ApplicationError(
+                f"plan {plan.plan_id} is at version {plan.current_version}; replan targets {data.expected_plan_version}",
+                "STALE_PLAN_VERSION",
+            )
         if plan.head().confirmation_reference != data.confirmation_reference:
-            raise ApplicationError("replan confirmation_reference does not match the current plan version")
+            raise ApplicationError("replan confirmation_reference does not match the current plan version", "CONFIRMATION_MISMATCH")
         line_items, total, allocations = self._line_items_from_proposal(data.replacement.replacement, data.merchant_lookup)
         confirmation_reference = data.confirmation_reference
         correlation_id = data.correlation_id
@@ -487,15 +528,53 @@ class ApplicationService:
         else:
             plan.status = PlanStatus.PROPOSED
         plan.updated_at = now
-        self._plans.save(plan)
-        self._revoke_prior_approvals(plan.plan_id, version_number)
-        if data.evidence:
-            self._evidence_reader.put(plan.plan_id, data.evidence)
+        invalidated = self._invalidated_prior_approvals(plan.plan_id, version_number)
+        if self._mutations is not None:
+            try:
+                self._mutations.apply_replan(plan, invalidated, data.evidence)
+            except ValueError as exc:
+                if str(exc) == "STALE_PLAN_VERSION":
+                    raise ApplicationError("plan version changed while applying the replan", "STALE_PLAN_VERSION") from exc
+                raise
+        else:
+            self._plans.save(plan)
+            for approval in invalidated:
+                self._approvals.save(approval)
+            if data.evidence:
+                self._evidence_reader.put(plan.plan_id, data.evidence)
         return plan
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _reserve_operation(self, expected: PaymentOperation, *, capacity_minor: int | None = None) -> tuple[PaymentOperation, bool]:
+        existing = self._payments.get(expected.operation_id)
+        if existing is not None:
+            self._assert_same_operation_request(existing, expected)
+            return existing, False
+        try:
+            stored, created = self._payments.reserve(expected, capacity_minor=capacity_minor)
+        except ValueError as exc:
+            labels = {
+                PaymentOperationKind.AUTHORIZE: "merchant allocation already has an active authorization",
+                PaymentOperationKind.CAPTURE: "authorization already has an active capture or void",
+                PaymentOperationKind.VOID: "authorization already has an active capture or void",
+                PaymentOperationKind.REFUND: "capture refund capacity is already reserved",
+            }
+            raise ApplicationError(labels[expected.kind], "PAYMENT_CAPACITY_RESERVED") from exc
+        if not created:
+            self._assert_same_operation_request(stored, expected)
+        return stored, created
+
+    @staticmethod
+    def _assert_same_operation_request(existing: PaymentOperation, expected: PaymentOperation) -> None:
+        immutable = (
+            "kind", "parent_operation_id", "plan_id", "plan_version", "approval_id",
+            "merchant_allocation_id", "amount", "recipient_reference",
+        )
+        if any(getattr(existing, field) != getattr(expected, field) for field in immutable):
+            raise ApplicationError("operation_id was reused for a different immutable payment request", "IDEMPOTENCY_MISMATCH")
 
     def _require_plan(self, plan_id: str) -> Plan:
         plan = self._plans.get(plan_id)
@@ -553,7 +632,20 @@ class ApplicationService:
         operation.failure_reason_code = result.reason_code
         operation.settled_at = result.settled_at
         self._payments.save(operation)
+        self._refresh_plan_after_payment(operation)
         return operation
+
+    def _refresh_plan_after_payment(self, operation: PaymentOperation) -> None:
+        if operation.kind is not PaymentOperationKind.CAPTURE or operation.status is not PaymentOperationStatus.SUCCEEDED:
+            return
+        plan = self._plans.get(operation.plan_id)
+        if plan is None or plan.current_version != operation.plan_version or plan.status is not PlanStatus.EXECUTING:
+            return
+        if self._all_allocations_captured(plan):
+            ensure_plan_transition(plan.status, PlanStatus.EXECUTED)
+            plan.status = PlanStatus.EXECUTED
+            plan.updated_at = self._now()
+            self._plans.save(plan)
 
     def _line_items_from_proposal(
         self,
@@ -668,3 +760,14 @@ _WEBHOOK_STATUS_MAP: dict[str, PaymentOperationStatus] = {
 
 def _webhook_target_status(event_type: str) -> PaymentOperationStatus | None:
     return _WEBHOOK_STATUS_MAP.get(event_type)
+
+
+def _webhook_kind_matches(kind: PaymentOperationKind, event_type: str) -> bool:
+    normalized = event_type.upper()
+    if kind is PaymentOperationKind.CAPTURE:
+        return "CAPTURE" in normalized
+    if kind is PaymentOperationKind.REFUND:
+        return "REFUND" in normalized
+    if kind in {PaymentOperationKind.AUTHORIZE, PaymentOperationKind.VOID}:
+        return "AUTHORIZATION" in normalized or "ORDER" in normalized
+    return False

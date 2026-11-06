@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState } from 'react';
+import React, { lazy, Suspense, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { AlertTriangle, ArrowLeft, ArrowRight, CalendarDays, CheckCircle2, Network, PackageSearch, Table2 } from 'lucide-react';
 import { useDemo } from '../../store/demoStore';
@@ -12,8 +12,16 @@ const money = (value: Money | null | undefined, currency = 'USD') => value ? new
 const classification = (proposal: BundleProposal) => proposal.compatibility_report.classification === 'verified_complete' ? 'Compatible' : proposal.compatibility_report.classification.replaceAll('_', ' ');
 
 export const BundleComparison: React.FC = () => {
-  const { proposals, selectedProposal, selectProposal, budgetDollars, preparePlan, setStep, errorMessage, isLoading, evidenceRecords, confirmedRequirements } = useDemo();
+  const { proposals, selectedProposal, selectProposal, budgetDollars, preparePlan, setStep, errorMessage, isLoading, evidenceRecords, confirmedRequirements, searchResult } = useDemo();
   const [activeTab, setActiveTab] = useState<'equipment' | 'connections' | 'delivery'>('equipment');
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const tabs = ['equipment', 'connections', 'delivery'] as const;
+  const onTabKeyDown = (event: React.KeyboardEvent, index: number) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    setActiveTab(tabs[next]); tabRefs.current[next]?.focus();
+  };
   const total = selectedProposal?.cost_breakdown.all_in_total;
   const budgetMinor = Math.round(budgetDollars * 100);
   const differenceMinor = total ? budgetMinor - total.amount_minor : null;
@@ -21,7 +29,7 @@ export const BundleComparison: React.FC = () => {
 
   if (!proposals.length) return <div className="screen-container">
     <header className="screen-heading"><p className="eyebrow">Bundle results</p><h1>Choose your setup</h1><p>No complete candidate is currently available for the confirmed requirements.</p></header>
-    <section className="empty-state-panel"><PackageSearch size={28} /><div><h2>No feasible bundle returned</h2><p>{errorMessage || 'The search completed without a bundle that met every hard requirement.'}</p><p>Review the confirmed constraints, missing evidence, or budget. An API failure is shown separately and does not prove physical incompatibility.</p></div></section>
+    <section className="empty-state-panel"><PackageSearch size={28} /><div><h2>{searchResult.status === 'infeasible' ? 'No feasible bundle found' : searchResult.status === 'blocked' ? 'Search blocked by unresolved information' : 'Bundle search did not complete'}</h2><p>{searchResult.infeasibility?.explanation || errorMessage || 'No candidate result is available.'}</p><p>{searchResult.status === 'infeasible' ? 'The backend completed its search and reported the listed constraints as infeasible.' : searchResult.status === 'blocked' ? 'Review missing evidence or requirements. This is not proof of physical incompatibility.' : 'A failed or interrupted request is not proof of physical incompatibility.'}</p>{searchResult.reason_codes.length > 0 && <p>Reason codes: {searchResult.reason_codes.join(', ')}</p>}</div></section>
     <div className="action-bar"><button type="button" className="btn-secondary" onClick={() => setStep('review')}><ArrowLeft size={17} /> Review requirements</button></div>
   </div>;
 
@@ -51,11 +59,11 @@ export const BundleComparison: React.FC = () => {
       {selectedProposal.cost_breakdown.unknown_cost_components?.length ? <div className="status-notice status-notice--warning"><AlertTriangle size={18} /><div><strong>Total is incomplete</strong><p>Unknown: {selectedProposal.cost_breakdown.unknown_cost_components.join(', ')}. Unknown costs are not treated as zero.</p></div></div> : null}
       {limitations.length > 0 && <section className="limitations-section"><h2>Needs attention</h2>{limitations.map((finding) => <details key={finding.rule_id}><summary><span className={`finding-dot finding-dot--${finding.status}`} />{finding.explanation}</summary><p>{finding.missing_requirements_or_evidence?.join(', ') || finding.reason_code}</p></details>)}</section>}
       <div className="view-tabs" role="tablist" aria-label="Selected bundle details">
-        <button type="button" role="tab" aria-selected={activeTab === 'equipment'} className={activeTab === 'equipment' ? 'is-active' : ''} onClick={() => setActiveTab('equipment')}><Table2 size={16} /> Equipment</button>
-        <button type="button" role="tab" aria-selected={activeTab === 'connections'} className={activeTab === 'connections' ? 'is-active' : ''} onClick={() => setActiveTab('connections')}><Network size={16} /> Connections</button>
-        <button type="button" role="tab" aria-selected={activeTab === 'delivery'} className={activeTab === 'delivery' ? 'is-active' : ''} onClick={() => setActiveTab('delivery')}><CalendarDays size={16} /> Delivery</button>
+        <button ref={(node) => { tabRefs.current[0] = node; }} id="bundle-tab-equipment" type="button" role="tab" aria-controls="bundle-panel-equipment" aria-selected={activeTab === 'equipment'} tabIndex={activeTab === 'equipment' ? 0 : -1} className={activeTab === 'equipment' ? 'is-active' : ''} onKeyDown={(event) => onTabKeyDown(event, 0)} onClick={() => setActiveTab('equipment')}><Table2 size={16} /> Equipment</button>
+        <button ref={(node) => { tabRefs.current[1] = node; }} id="bundle-tab-connections" type="button" role="tab" aria-controls="bundle-panel-connections" aria-selected={activeTab === 'connections'} tabIndex={activeTab === 'connections' ? 0 : -1} className={activeTab === 'connections' ? 'is-active' : ''} onKeyDown={(event) => onTabKeyDown(event, 1)} onClick={() => setActiveTab('connections')}><Network size={16} /> Connections</button>
+        <button ref={(node) => { tabRefs.current[2] = node; }} id="bundle-tab-delivery" type="button" role="tab" aria-controls="bundle-panel-delivery" aria-selected={activeTab === 'delivery'} tabIndex={activeTab === 'delivery' ? 0 : -1} className={activeTab === 'delivery' ? 'is-active' : ''} onKeyDown={(event) => onTabKeyDown(event, 2)} onClick={() => setActiveTab('delivery')}><CalendarDays size={16} /> Delivery</button>
       </div>
-      <div className="detail-view"><Suspense fallback={<div className="loading-screen" role="status">Loading details…</div>}>
+      <div id={`bundle-panel-${activeTab}`} role="tabpanel" aria-labelledby={`bundle-tab-${activeTab}`} className="detail-view"><Suspense fallback={<div className="loading-screen" role="status">Loading details…</div>}>
         {activeTab === 'equipment' && <BundleGrid proposal={selectedProposal} />}
         {activeTab === 'connections' && <EvidenceGraph report={selectedProposal.compatibility_report} evidence={evidenceRecords} />}
         {activeTab === 'delivery' && <ScheduleTimeline deadline={confirmedRequirements?.deadline} />}

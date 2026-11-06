@@ -8,10 +8,10 @@ from typing import Any
 from bundlegraph.models import ConfirmedRequirements, DraftRequirements, Evidence, FixtureCatalog
 
 from .auth import ResourceOwnershipRepository
-from .persistence import ApprovalRepository, EvidenceReader, PaymentRepository, PlanRepository, WebhookEventRepository
+from .persistence import ApplicationMutationRepository, ApprovalRepository, EvidenceReader, PaymentRepository, PlanRepository, WebhookEventRepository
 from .planning import AuthoritativePlanningInputs
-from .requirements import CatalogRepository, RequirementDraftRecord, RequirementDraftRepository
-from .state import Approval, PaymentOperation, Plan, WebhookEvent
+from .requirements import CatalogRepository, RequirementDraftRecord, RequirementDraftRepository, StaleDraftError
+from .state import Approval, PaymentOperation, PaymentOperationKind, Plan, WebhookEvent
 
 
 def _default_connect(database_url: str) -> Any:
@@ -44,6 +44,67 @@ class PostgresPlanRepository(_PostgresBase, PlanRepository):
         with self.connection() as connection, connection.cursor() as cursor:
             cursor.execute("SELECT document FROM bundlegraph_plans WHERE plan_id=%s", (plan_id,)); row = cursor.fetchone()
         return Plan.model_validate(row[0]) if row else None
+
+    def get_by_creation_key(self, key: str) -> Plan | None:
+        with self.connection() as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT document FROM bundlegraph_plans WHERE document->>'creation_idempotency_key'=%s", (key,)); row = cursor.fetchone()
+        return Plan.model_validate(row[0]) if row else None
+
+
+class PostgresApplicationMutationRepository(_PostgresBase, ApplicationMutationRepository):
+    """Transactional application mutations; provider calls never run inside these blocks."""
+
+    def create_plan(self, plan: Plan, evidence: tuple[Evidence, ...], owner_subject: str) -> Plan:
+        with self.connection() as connection, connection.cursor() as cursor:
+            if plan.creation_idempotency_key:
+                cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (f"plan-create:{plan.creation_idempotency_key}",))
+                cursor.execute("SELECT document FROM bundlegraph_plans WHERE document->>'creation_idempotency_key'=%s", (plan.creation_idempotency_key,))
+                row = cursor.fetchone()
+                if row:
+                    existing = Plan.model_validate(row[0])
+                    if existing.creation_request_fingerprint != plan.creation_request_fingerprint:
+                        raise ValueError("IDEMPOTENCY_MISMATCH")
+                    return existing
+            cursor.execute("INSERT INTO bundlegraph_plans(plan_id,document,updated_at) VALUES (%s,%s::jsonb,%s)", (plan.plan_id, self.document(plan), plan.updated_at))
+            for record in evidence:
+                cursor.execute("INSERT INTO bundlegraph_plan_evidence(plan_id,evidence_id,document) VALUES (%s,%s,%s::jsonb)", (plan.plan_id, record.evidence_id, self.document(record)))
+            cursor.execute("INSERT INTO bundlegraph_resource_owners(resource_type,resource_id,owner_subject) VALUES ('plan',%s,%s)", (plan.plan_id, owner_subject))
+        return plan
+
+    def grant_approval(self, plan: Plan, approval: Approval, invalidated: tuple[Approval, ...]) -> None:
+        with self.connection() as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT document FROM bundlegraph_plans WHERE plan_id=%s FOR UPDATE", (plan.plan_id,))
+            row = cursor.fetchone()
+            if row is None:
+                raise ValueError("PLAN_NOT_FOUND")
+            persisted = Plan.model_validate(row[0])
+            if persisted.current_version != approval.plan_version or persisted.head().fingerprint != approval.plan_fingerprint:
+                raise ValueError("STALE_PLAN_VERSION")
+            cursor.execute("UPDATE bundlegraph_plans SET document=%s::jsonb,updated_at=%s WHERE plan_id=%s", (self.document(plan), plan.updated_at, plan.plan_id))
+            if cursor.rowcount != 1:
+                raise ValueError("PLAN_NOT_FOUND")
+            for prior in invalidated:
+                cursor.execute("UPDATE bundlegraph_approvals SET document=%s::jsonb,updated_at=now() WHERE approval_id=%s", (self.document(prior), prior.approval_id))
+                if cursor.rowcount != 1:
+                    raise ValueError("APPROVAL_NOT_FOUND")
+            cursor.execute("INSERT INTO bundlegraph_approvals(approval_id,plan_id,document) VALUES (%s,%s,%s::jsonb)", (approval.approval_id, approval.plan_id, self.document(approval)))
+
+    def apply_replan(self, plan: Plan, invalidated: tuple[Approval, ...], evidence: tuple[Evidence, ...]) -> None:
+        with self.connection() as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT document FROM bundlegraph_plans WHERE plan_id=%s FOR UPDATE", (plan.plan_id,))
+            row = cursor.fetchone()
+            if row is None:
+                raise ValueError("PLAN_NOT_FOUND")
+            persisted = Plan.model_validate(row[0])
+            if persisted.current_version + 1 != plan.current_version:
+                raise ValueError("STALE_PLAN_VERSION")
+            cursor.execute("UPDATE bundlegraph_plans SET document=%s::jsonb,updated_at=%s WHERE plan_id=%s", (self.document(plan), plan.updated_at, plan.plan_id))
+            for prior in invalidated:
+                cursor.execute("UPDATE bundlegraph_approvals SET document=%s::jsonb,updated_at=now() WHERE approval_id=%s", (self.document(prior), prior.approval_id))
+                if cursor.rowcount != 1:
+                    raise ValueError("APPROVAL_NOT_FOUND")
+            for record in evidence:
+                cursor.execute("INSERT INTO bundlegraph_plan_evidence(plan_id,evidence_id,document) VALUES (%s,%s,%s::jsonb) ON CONFLICT(plan_id,evidence_id) DO UPDATE SET document=EXCLUDED.document", (plan.plan_id, record.evidence_id, self.document(record)))
 
 
 class PostgresApprovalRepository(_PostgresBase, ApprovalRepository):
@@ -89,6 +150,33 @@ class PostgresPaymentRepository(_PostgresBase, PaymentRepository):
             cursor.execute("SELECT document FROM bundlegraph_payment_operations WHERE document->>'provider_reference'=%s LIMIT 1", (provider_reference,)); row = cursor.fetchone()
         return PaymentOperation.model_validate(row[0]) if row else None
 
+    def reserve(self, operation: PaymentOperation, *, capacity_minor: int | None = None) -> tuple[PaymentOperation, bool]:
+        if operation.kind is PaymentOperationKind.AUTHORIZE:
+            scope = f"authorize:{operation.plan_id}:{operation.plan_version}:{operation.merchant_allocation_id}"
+        elif operation.kind in {PaymentOperationKind.CAPTURE, PaymentOperationKind.VOID}:
+            scope = f"authorization-disposition:{operation.parent_operation_id}"
+        else:
+            scope = f"refund:{operation.parent_operation_id}"
+        with self.connection() as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (scope,))
+            cursor.execute("SELECT document FROM bundlegraph_payment_operations WHERE operation_id=%s", (operation.operation_id,)); existing = cursor.fetchone()
+            if existing:
+                return PaymentOperation.model_validate(existing[0]), False
+            active = ("submitted", "uncertain", "succeeded")
+            if operation.kind is PaymentOperationKind.AUTHORIZE:
+                cursor.execute("SELECT 1 FROM bundlegraph_payment_operations WHERE plan_id=%s AND document->>'plan_version'=%s AND document->>'kind'='authorize' AND document->>'merchant_allocation_id'=%s AND document->>'status'=ANY(%s) LIMIT 1", (operation.plan_id, str(operation.plan_version), operation.merchant_allocation_id, list(active)))
+                conflict = cursor.fetchone() is not None
+            elif operation.kind in {PaymentOperationKind.CAPTURE, PaymentOperationKind.VOID}:
+                cursor.execute("SELECT 1 FROM bundlegraph_payment_operations WHERE document->>'kind'=ANY(%s) AND document->>'parent_operation_id'=%s AND document->>'status'=ANY(%s) LIMIT 1", ([PaymentOperationKind.CAPTURE.value, PaymentOperationKind.VOID.value], operation.parent_operation_id, list(active)))
+                conflict = cursor.fetchone() is not None
+            else:
+                cursor.execute("SELECT COALESCE(SUM((document->'amount'->>'amount_minor')::bigint),0) FROM bundlegraph_payment_operations WHERE document->>'kind'='refund' AND document->>'parent_operation_id'=%s AND document->>'status'=ANY(%s)", (operation.parent_operation_id, list(active))); reserved = int(cursor.fetchone()[0])
+                conflict = capacity_minor is None or reserved + operation.amount.amount_minor > capacity_minor
+            if conflict:
+                raise ValueError("PAYMENT_CAPACITY_ALREADY_RESERVED")
+            cursor.execute("INSERT INTO bundlegraph_payment_operations(operation_id, plan_id, idempotency_key, document) VALUES (%s,%s,%s,%s::jsonb) RETURNING document", (operation.operation_id, operation.plan_id, operation.idempotency_key, self.document(operation))); row = cursor.fetchone()
+        return PaymentOperation.model_validate(row[0]), True
+
 
 class PostgresWebhookEventRepository(_PostgresBase, WebhookEventRepository):
     def record_if_new(self, event: WebhookEvent) -> bool:
@@ -99,6 +187,10 @@ class PostgresWebhookEventRepository(_PostgresBase, WebhookEventRepository):
         with self.connection() as connection, connection.cursor() as cursor:
             cursor.execute("SELECT document FROM bundlegraph_webhook_events WHERE event_id=%s", (event_id,)); row = cursor.fetchone()
         return WebhookEvent.model_validate(row[0]) if row else None
+
+    def save(self, event: WebhookEvent) -> None:
+        with self.connection() as connection, connection.cursor() as cursor:
+            cursor.execute("UPDATE bundlegraph_webhook_events SET document=%s::jsonb WHERE event_id=%s", (self.document(event), event.event_id))
 
 
 class PostgresEvidenceReader(_PostgresBase, EvidenceReader):
@@ -114,17 +206,36 @@ class PostgresEvidenceReader(_PostgresBase, EvidenceReader):
 
 
 class PostgresRequirementDraftRepository(_PostgresBase, RequirementDraftRepository):
-    def save(self, record: RequirementDraftRecord) -> None:
+    def save(self, record: RequirementDraftRecord, *, expected_version: int | None = None) -> None:
         with self.connection() as connection, connection.cursor() as cursor:
-            cursor.execute("INSERT INTO bundlegraph_requirement_drafts(request_reference,owner_subject,version,draft,clarification_questions,created_at,updated_at) VALUES (%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s) ON CONFLICT(request_reference) DO UPDATE SET version=EXCLUDED.version,draft=EXCLUDED.draft,clarification_questions=EXCLUDED.clarification_questions,updated_at=EXCLUDED.updated_at WHERE bundlegraph_requirement_drafts.owner_subject=EXCLUDED.owner_subject RETURNING owner_subject", (record.draft.request_reference, record.owner_subject, record.version, self.document(record.draft), json.dumps(record.clarification_questions), record.created_at, record.updated_at))
+            if expected_version is None:
+                cursor.execute("INSERT INTO bundlegraph_requirement_drafts(request_reference,owner_subject,version,draft,clarification_questions,created_at,updated_at) VALUES (%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s) ON CONFLICT(request_reference) DO NOTHING RETURNING version", (record.draft.request_reference, record.owner_subject, record.version, self.document(record.draft), json.dumps(record.clarification_questions), record.created_at, record.updated_at))
+            else:
+                cursor.execute("UPDATE bundlegraph_requirement_drafts SET version=%s,draft=%s::jsonb,clarification_questions=%s::jsonb,updated_at=%s WHERE request_reference=%s AND owner_subject=%s AND version=%s RETURNING version", (record.version, self.document(record.draft), json.dumps(record.clarification_questions), record.updated_at, record.draft.request_reference, record.owner_subject, expected_version))
             row = cursor.fetchone()
-            if row is None or row[0] != record.owner_subject:
-                raise ValueError("request already has a different owner")
+            if row is None:
+                cursor.execute("SELECT version,owner_subject FROM bundlegraph_requirement_drafts WHERE request_reference=%s", (record.draft.request_reference,)); actual = cursor.fetchone()
+                if actual is not None and actual[1] != record.owner_subject:
+                    raise ValueError("request already has a different owner")
+                raise StaleDraftError(expected_version, actual[0] if actual else None)
 
     def get(self, request_reference: str) -> RequirementDraftRecord | None:
         with self.connection() as connection, connection.cursor() as cursor:
             cursor.execute("SELECT owner_subject,version,draft,clarification_questions,created_at,updated_at FROM bundlegraph_requirement_drafts WHERE request_reference=%s", (request_reference,)); row = cursor.fetchone()
         return RequirementDraftRecord(owner_subject=row[0], version=row[1], draft=DraftRequirements.model_validate(row[2]), clarification_questions=tuple(row[3]), created_at=row[4], updated_at=row[5]) if row else None
+
+    def confirm_current(self, request_reference: str, owner_subject: str, expected_version: int, action: Callable[[RequirementDraftRecord], None]) -> RequirementDraftRecord:
+        """Hold a row lock until the immutable confirmation snapshot is persisted."""
+        with self.connection() as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT owner_subject,version,draft,clarification_questions,created_at,updated_at FROM bundlegraph_requirement_drafts WHERE request_reference=%s FOR SHARE", (request_reference,))
+            row = cursor.fetchone()
+            if row is None or row[0] != owner_subject:
+                raise KeyError(request_reference)
+            if row[1] != expected_version:
+                raise StaleDraftError(expected_version, row[1])
+            snapshot = RequirementDraftRecord(owner_subject=row[0], version=row[1], draft=DraftRequirements.model_validate(row[2]), clarification_questions=tuple(row[3]), created_at=row[4], updated_at=row[5])
+            action(snapshot)
+            return snapshot
 
     def next_version(self, request_reference: str) -> int:
         record = self.get(request_reference); return record.version + 1 if record else 1

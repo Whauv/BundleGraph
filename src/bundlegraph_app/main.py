@@ -15,11 +15,11 @@ from .paypal import DisabledPayPalClient, FakeSandboxClient, PayPalAdapter
 from .paypal_browser import BrowserPaymentOrchestrator
 from .paypal_sandbox import PayPalSandboxOrdersClient
 from .paypal_webhook import PayPalDirectWebhookVerifier
-from .persistence import new_in_memory_repositories
+from .persistence import new_in_memory_application_repositories
 from .planning import PlanningInputsRepository
 from .config import RuntimeMode, application_settings, frontend_origins, production_settings, runtime_mode
-from .auth import ConfiguredBearerAuthenticationProvider, Identity, OidcIntrospectionAuthenticationProvider, RejectingAuthenticationProvider
-from .postgres import PostgresApprovalRepository, PostgresCatalogRepository, PostgresEvidenceReader, PostgresPaymentRepository, PostgresPlanRepository, PostgresPlanningInputsRepository, PostgresRequirementDraftRepository, PostgresResourceOwnershipRepository, PostgresWebhookEventRepository, postgres_ready
+from .auth import ConfiguredBearerAuthenticationProvider, Identity, InMemoryResourceOwnershipRepository, OidcIntrospectionAuthenticationProvider, RejectingAuthenticationProvider
+from .postgres import PostgresApplicationMutationRepository, PostgresApprovalRepository, PostgresCatalogRepository, PostgresEvidenceReader, PostgresPaymentRepository, PostgresPlanRepository, PostgresPlanningInputsRepository, PostgresRequirementDraftRepository, PostgresResourceOwnershipRepository, PostgresWebhookEventRepository, postgres_ready
 from .discovery import CatalogCandidateDiscovery, Channel3CandidateDiscovery
 from bundlegraph.channel3 import Channel3DiscoveryAdapter
 from bundlegraph.interpretation import ProviderNotConfigured, configured_provider
@@ -44,7 +44,8 @@ def _configured_extraction_provider():
 
 def build_demo_app() -> "FastAPI":  # noqa: F821 -- forward reference for lazy FastAPI import
     """Compose only deterministic demo adapters; never use this for production."""
-    plans, approvals, payments, webhooks, evidence_reader = new_in_memory_repositories()
+    ownership = InMemoryResourceOwnershipRepository()
+    plans, approvals, payments, webhooks, evidence_reader, mutations = new_in_memory_application_repositories(ownership)
     sandbox_recipients = frozenset(
         os.getenv("BUNDLEGRAPH_SANDBOX_RECIPIENTS", "merchant-reference-demo").split(",")
     )
@@ -56,11 +57,12 @@ def build_demo_app() -> "FastAPI":  # noqa: F821 -- forward reference for lazy F
         webhook_events=webhooks,
         evidence_reader=evidence_reader,
         paypal=adapter,
+        mutations=mutations,
     )
     # A real deployment injects a durable confirmation/catalog repository during
     # startup.  The empty local repository deliberately fails closed until an
     # authoritative confirmation has been registered.
-    return build_app(service, evidence_reader, PlanningInputsRepository(), readiness={"persistence": False, "authentication": False, "paypal": False, "webhook_verifier": False}, allowed_origins=frontend_origins(), authentication_provider=RejectingAuthenticationProvider(), frontend_directory=str(_frontend_directory()), runtime_name="demo")
+    return build_app(service, evidence_reader, PlanningInputsRepository(), readiness={"persistence": False, "authentication": False, "paypal": False, "webhook_verifier": False}, allowed_origins=frontend_origins(), authentication_provider=RejectingAuthenticationProvider(), ownership=ownership, frontend_directory=str(_frontend_directory()), runtime_name="demo")
 
 
 def build_application_app() -> "FastAPI":  # noqa: F821
@@ -85,7 +87,7 @@ def build_application_app() -> "FastAPI":  # noqa: F821
         else ConfiguredBearerAuthenticationProvider(identities)
     )
     paypal = PayPalAdapter(DisabledPayPalClient(), settings.sandbox_recipients)
-    service = ApplicationService(plans=plans, approvals=approvals, payments=payments, webhook_events=webhooks, evidence_reader=evidence_reader, paypal=paypal)
+    service = ApplicationService(plans=plans, approvals=approvals, payments=payments, webhook_events=webhooks, evidence_reader=evidence_reader, paypal=paypal, mutations=PostgresApplicationMutationRepository(settings.database_url))
     database_ready = postgres_ready(settings.database_url)
     catalog_ready = database_ready and catalogs.get_active() is not None
     channel3_key = os.getenv("CHANNEL3_API_KEY", "").strip()
@@ -131,6 +133,7 @@ def build_production_app() -> "FastAPI":  # noqa: F821
         webhook_events=webhooks,
         evidence_reader=evidence_reader,
         paypal=paypal_adapter,
+        mutations=PostgresApplicationMutationRepository(settings.database_url),
     )
     database_ready = postgres_ready(settings.database_url)
     catalog_ready = database_ready and catalogs.get_active() is not None

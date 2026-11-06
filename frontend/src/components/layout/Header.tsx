@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { ChevronDown, FlaskConical, LogOut, Moon, MoreHorizontal, RotateCcw, Sun, UserRound } from 'lucide-react';
 import { useDemo } from '../../store/demoStore';
 import { clearSession } from '../../auth/session';
@@ -6,7 +6,12 @@ import { clearSession } from '../../auth/session';
 export type Theme = 'light' | 'dark';
 
 export const Header: React.FC<{ theme: Theme; onToggleTheme: () => void }> = ({ theme, onToggleTheme }) => {
-  const { presets, activePresetId, loadPreset, resetAll, isLoading, runtimeMode } = useDemo();
+  const { presets, activePresetId, loadPreset, resetAll, isLoading, runtimeMode, currentStep, interpretation } = useDemo();
+  const demoMenu = useRef<HTMLDetailsElement>(null);
+  const choosePreset = async (preset: (typeof presets)[number]) => {
+    if ((currentStep !== 'builder' || interpretation) && !window.confirm('Replace the current browser workflow with this synthetic scenario?')) return;
+    await loadPreset(preset); if (demoMenu.current) demoMenu.current.open = false;
+  };
   const reset = () => { if (window.confirm('Start a new setup? This clears the current browser workflow.')) void resetAll(); };
   return <header className="app-header">
     <div className="app-header__inner">
@@ -17,11 +22,11 @@ export const Header: React.FC<{ theme: Theme; onToggleTheme: () => void }> = ({ 
       <div className="header-actions">
         <span className={`environment-indicator ${runtimeMode === 'fixture' ? 'environment-indicator--fixture' : ''}`}><span aria-hidden="true" />{runtimeMode === 'fixture' ? 'Synthetic demo data' : 'Connected application'}</span>
         <button type="button" className="icon-button" onClick={onToggleTheme} aria-label={`Use ${theme === 'dark' ? 'light' : 'dark'} theme`}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button>
-        <details className="header-menu">
+        <details className="header-menu" ref={demoMenu}>
           <summary><FlaskConical size={16} /> Demo tools <ChevronDown size={14} /></summary>
           <div className="header-menu__panel header-menu__panel--wide">
             <p className="menu-label">Labeled scenarios</p><p className="menu-copy">These replace the current browser draft and never represent live inventory.</p>
-            <div className="scenario-actions">{presets.map((preset) => <button key={preset.id} type="button" className={`scenario-button ${activePresetId === preset.id ? 'is-active' : ''}`} onClick={() => void loadPreset(preset)} disabled={isLoading}>{preset.name}</button>)}</div>
+            <div className="scenario-actions">{presets.map((preset) => <button key={preset.id} type="button" className={`scenario-button ${activePresetId === preset.id ? 'is-active' : ''}`} onClick={() => void choosePreset(preset)} disabled={isLoading}>{preset.name}</button>)}</div>
             <div className="menu-section"><p className="menu-label">Developer details</p><p className="menu-copy">Runtime: {runtimeMode}. Provider and schema diagnostics remain server-controlled.</p></div>
           </div>
         </details>

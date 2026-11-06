@@ -29,7 +29,7 @@ from bundlegraph_app.application import (
     CreatePlanInput,
     SubmitApprovalInput,
 )
-from bundlegraph_app.paypal import FakeSandboxClient, PayPalAdapter, PayPalResultStatus
+from bundlegraph_app.paypal import FakeSandboxClient, PayPalAdapter, PayPalResult, PayPalResultStatus
 from bundlegraph_app.persistence import new_in_memory_repositories
 from bundlegraph_app.state import (
     ApprovalStatus,
@@ -46,6 +46,7 @@ REQUIRED = (
     QuantityRequirement(category="xlr_cable", quantity=2),
     QuantityRequirement(category="headphones", quantity=2),
 )
+FIXED_NOW = datetime(2026, 10, 25, 12, 0, tzinfo=UTC)
 
 
 def _available_catalog():
@@ -171,7 +172,7 @@ def test_approval_rejects_mismatched_fingerprint():
         )
 
 
-def test_approval_requires_permitted_total_at_or_above_plan_total():
+def test_approval_requires_exact_plan_total():
     service, catalog, *_ = _wire_service()
     proposal = _first_proposal(catalog)
     plan = service.create_plan(CreatePlanInput("confirm-ap-1", "corr-1", proposal, _merchant_lookup(catalog)))
@@ -187,6 +188,11 @@ def test_approval_requires_permitted_total_at_or_above_plan_total():
                 permitted_total=low,
             )
         )
+    high = Money(amount_minor=head.total.amount_minor + 1, currency=head.total.currency)
+    with pytest.raises(ApplicationError, match="exact plan total"):
+        service.submit_approval(SubmitApprovalInput(plan_id=plan.plan_id, plan_version=head.version, plan_fingerprint=head.fingerprint, actor_reference="user-123", permitted_total=high))
+    with pytest.raises(ApplicationError, match="currency"):
+        service.submit_approval(SubmitApprovalInput(plan_id=plan.plan_id, plan_version=head.version, plan_fingerprint=head.fingerprint, actor_reference="user-123", permitted_total=Money(amount_minor=head.total.amount_minor, currency="EUR")))
 
 
 def test_approval_moves_plan_to_approved_and_record_granted():
@@ -310,16 +316,66 @@ def test_authorize_rejects_approval_total_that_differs_from_stored_plan():
     proposal = _first_proposal(catalog)
     plan = service.create_plan(CreatePlanInput("confirm-ap-1", "corr-1", proposal, _merchant_lookup(catalog)))
     head = plan.head()
-    approval = service.submit_approval(SubmitApprovalInput(
-        plan_id=plan.plan_id, plan_version=head.version, plan_fingerprint=head.fingerprint,
-        actor_reference="user-123", permitted_total=Money(amount_minor=head.total.amount_minor + 1, currency=head.total.currency),
-    ))
-    with pytest.raises(ApplicationError):
-        service.authorize_payment(
-            approval_id=approval.approval_id,
-            operation_id="op-auth-over",
-            merchant_allocation_id=_allocation_id(plan),
-        )
+    with pytest.raises(ApplicationError, match="exact plan total"):
+        service.submit_approval(SubmitApprovalInput(
+            plan_id=plan.plan_id, plan_version=head.version, plan_fingerprint=head.fingerprint,
+            actor_reference="user-123", permitted_total=Money(amount_minor=head.total.amount_minor + 1, currency=head.total.currency),
+        ))
+
+
+def test_plan_creation_idempotency_is_owner_scoped_and_bound_to_inputs():
+    service, catalog, *_ = _wire_service()
+    proposal = _first_proposal(catalog)
+    data = CreatePlanInput("confirm-ap-1", "corr-create", proposal, _merchant_lookup(catalog), creation_idempotency_key="create-command-1", owner_subject="user-1")
+    first = service.create_plan(data)
+    repeated = service.create_plan(data)
+    assert repeated.plan_id == first.plan_id
+    with pytest.raises(ApplicationError) as mismatch:
+        service.create_plan(CreatePlanInput("another-confirmation", "corr-create", proposal, _merchant_lookup(catalog), creation_idempotency_key="create-command-1", owner_subject="user-1"))
+    assert mismatch.value.reason_code == "IDEMPOTENCY_MISMATCH"
+    other_owner = service.create_plan(CreatePlanInput("confirm-ap-1", "corr-create", proposal, _merchant_lookup(catalog), creation_idempotency_key="create-command-1", owner_subject="user-2"))
+    assert other_owner.plan_id != first.plan_id
+
+
+def test_operation_id_replay_is_bound_to_immutable_request_without_provider_call():
+    service, catalog, *_, client, _ = _wire_service()
+    plan, approval, _ = _approved(service, catalog)
+    auth = service.authorize_payment(approval_id=approval.approval_id, operation_id="op-bound", merchant_allocation_id=_allocation_id(plan))
+    provider_results_before = len(client._by_request_id)
+    with pytest.raises(ApplicationError) as mismatch:
+        service.capture_payment(parent_operation_id=auth.operation_id, operation_id="op-bound")
+    assert mismatch.value.reason_code == "IDEMPOTENCY_MISMATCH"
+    assert len(client._by_request_id) == provider_results_before
+
+
+def test_reused_operation_id_rejects_different_allocation_parent_and_refund_amount():
+    service, catalog, *_, client, _ = _wire_service()
+    proposal = _first_proposal(catalog)
+    lookup = _merchant_lookup(catalog)
+    lookup[proposal.line_items[0].offer_id] = "merchant-a"
+    lookup[proposal.line_items[1].offer_id] = "merchant-b"
+    plan = service.create_plan(CreatePlanInput("confirm-ap-1", "corr-replay", proposal, lookup))
+    head = plan.head()
+    approval = service.submit_approval(SubmitApprovalInput(plan_id=plan.plan_id, plan_version=1, plan_fingerprint=head.fingerprint, actor_reference="user-123", permitted_total=head.total))
+    first, second = head.merchant_allocations[:2]
+    auth_one = service.authorize_payment(approval_id=approval.approval_id, operation_id="op-auth-one", merchant_allocation_id=first.allocation_id)
+    calls = len(client._by_request_id)
+    with pytest.raises(ApplicationError, match="different immutable"):
+        service.authorize_payment(approval_id=approval.approval_id, operation_id="op-auth-one", merchant_allocation_id=second.allocation_id)
+    assert len(client._by_request_id) == calls
+    auth_two = service.authorize_payment(approval_id=approval.approval_id, operation_id="op-auth-two", merchant_allocation_id=second.allocation_id)
+    capture = service.capture_payment(parent_operation_id=auth_one.operation_id, operation_id="op-cap-one")
+    calls = len(client._by_request_id)
+    with pytest.raises(ApplicationError, match="different immutable"):
+        service.capture_payment(parent_operation_id=auth_two.operation_id, operation_id="op-cap-one")
+    assert len(client._by_request_id) == calls
+    amount = Money(amount_minor=max(1, capture.amount.amount_minor // 3), currency=capture.amount.currency)
+    service.refund_capture(parent_operation_id=capture.operation_id, operation_id="op-ref-one", amount=amount)
+    calls = len(client._by_request_id)
+    changed = Money(amount_minor=amount.amount_minor + 1, currency=amount.currency)
+    with pytest.raises(ApplicationError, match="different immutable"):
+        service.refund_capture(parent_operation_id=capture.operation_id, operation_id="op-ref-one", amount=changed)
+    assert len(client._by_request_id) == calls
 
 
 def test_void_after_authorize_succeeds():
@@ -380,6 +436,44 @@ def test_duplicate_and_unverified_webhook_events_do_not_change_state():
     # Unverified event is ignored entirely.
     bad = event.model_copy(update={"event_id": "evt-2", "verified": False})
     assert service.record_webhook_event(bad) is False
+
+
+def test_received_webhook_retries_after_interrupted_operation_write_and_refreshes_plan():
+    class UncertainCaptureClient(FakeSandboxClient):
+        def capture(self, *, request_id, authorization_reference, amount, operation_id):
+            result = PayPalResult(PayPalResultStatus.UNCERTAIN, "CAP-PENDING", "OUTCOME_UNKNOWN", FIXED_NOW)
+            self._by_request_id[request_id] = result
+            return result
+
+    class FailOncePayments:
+        def __init__(self, delegate):
+            self.delegate = delegate
+            self.fail_next_save = False
+        def __getattr__(self, name):
+            return getattr(self.delegate, name)
+        def save(self, operation):
+            if self.fail_next_save:
+                self.fail_next_save = False
+                raise RuntimeError("injected payment write failure")
+            self.delegate.save(operation)
+
+    plans, approvals, raw_payments, webhooks, evidence_reader = new_in_memory_repositories()
+    payments = FailOncePayments(raw_payments)
+    catalog = _available_catalog()
+    client = UncertainCaptureClient(now_factory=lambda: FIXED_NOW)
+    service = ApplicationService(plans=plans, approvals=approvals, payments=payments, webhook_events=webhooks, evidence_reader=evidence_reader, paypal=PayPalAdapter(client, frozenset(offer.merchant_reference for offer in catalog.offers)), now=lambda: FIXED_NOW)
+    plan, approval, _ = _approved(service, catalog)
+    auth = service.authorize_payment(approval_id=approval.approval_id, operation_id="op-auth-retry", merchant_allocation_id=_allocation_id(plan))
+    capture = service.capture_payment(parent_operation_id=auth.operation_id, operation_id="op-cap-retry")
+    assert capture.status is PaymentOperationStatus.UNCERTAIN
+    event = WebhookEvent(event_id="evt-retry", event_type="PAYMENT.CAPTURE.COMPLETED", received_at=FIXED_NOW, verified=True, resource_reference="CAP-PENDING", operation_id=capture.operation_id, raw_payload_fingerprint="b" * 32)
+    payments.fail_next_save = True
+    with pytest.raises(RuntimeError, match="injected"):
+        service.record_webhook_event(event)
+    assert webhooks.get(event.event_id).processed_at is None
+    assert service.record_webhook_event(event) is True
+    assert raw_payments.get(capture.operation_id).status is PaymentOperationStatus.SUCCEEDED
+    assert plans.get(plan.plan_id).status is PlanStatus.EXECUTED
 
 
 # ---------------------------------------------------------------------------

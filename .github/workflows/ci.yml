@@ -29,6 +29,16 @@ jobs:
       - run: npm --prefix frontend run check
       - run: npx --prefix frontend playwright install --with-deps chromium
       - run: npm --prefix frontend run test:e2e
+      - name: Upload Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure-artifacts
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 7
       - run: python -m compileall -q src
 
   container:
@@ -38,8 +48,18 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker compose -f compose.sandbox.yml up --detach --build --wait
       - run: curl --fail --show-error http://127.0.0.1:8080/healthz
+      - run: curl --fail --show-error http://127.0.0.1:8080/readyz
       - run: curl --fail --show-error http://127.0.0.1:8080/runtime-config
-      - if: failure()
-        run: docker compose -f compose.sandbox.yml logs --no-color
+      - name: Run disposable authoritative workflow smoke
+        run: python scripts/authoritative_smoke.py
+      - if: always()
+        run: docker compose -f compose.sandbox.yml logs --no-color > container-logs.txt
+      - name: Upload container logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-failure-logs
+          path: container-logs.txt
+          retention-days: 7
       - if: always()
         run: docker compose -f compose.sandbox.yml down --volumes

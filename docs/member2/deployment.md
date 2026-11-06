@@ -88,7 +88,10 @@ That remains the explicit CD handoff rather than an invented deployment.
 `PostgresCatalogRepository`, `PostgresPlanningInputsRepository`, and
 `PostgresResourceOwnershipRepository` implement the existing ports. Migrations
 `001` and `002` provide unique operation/idempotency constraints and ownership,
-draft, catalog, and immutable confirmation-snapshot records.
+draft, catalog, and immutable confirmation-snapshot records. Forward migration
+`003_authoritative_boundary_hardening.sql` adds owner-scoped plan-creation replay
+protection, active authorization/disposition constraints, refund lookup support,
+and an unprocessed-webhook index. Do not edit already-applied migrations.
 
 The request flow is `guided draft -> clarification -> confirmation -> immutable
 catalog snapshot -> deterministic generation -> stored plan/evidence -> approval`.

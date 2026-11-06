@@ -140,3 +140,12 @@ def test_plan_creation_uses_authoritative_inputs_and_persists_selected_evidence(
     assert evidence.status_code == 200
     assert evidence.json()["status"] == "ok"
     assert evidence.json()["evidence"]
+
+
+def test_plan_creation_lost_response_retry_returns_same_plan():
+    client, _ = _client()
+    body = {"schema_version": "1.0", "correlation_id": "corr-retry", "confirmation_reference": "confirm-api-1", "idempotency_key": "create-plan-command-001"}
+    first = client.post("/plans", json=body)
+    second = client.post("/plans", json=body)
+    assert first.status_code == second.status_code == 200
+    assert first.json()["plan"]["plan_id"] == second.json()["plan"]["plan_id"]

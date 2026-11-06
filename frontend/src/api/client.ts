@@ -1,15 +1,17 @@
 import type {
-  ApiFailure, ApprovalRecord, AuthoritativePlan, BundleProposal, ConfirmedRequirements, DraftRequirements,
+  ApiFailure, ApprovalRecord, AuthoritativePlan, BundleProposal, ConfirmedRequirements,
   EvidenceRecord, ExecutionRecord, PresetScenario, ReplanResult, RequirementInterpretation,
 } from '../types/bundlegraph';
-import { OFFLINE_PRESETS, SAMPLE_CONFIRMED_REQ, SAMPLE_INTERPRETATION, SAMPLE_PROPOSAL, SAMPLE_REPLAN_RESULT } from '../fixtures/offlineData';
 import { clearSession, getAccessToken } from '../auth/session';
+import { createFixtureAdapter, FixtureContractError } from './fixtureAdapter';
 
 const configuredRuntime = import.meta.env.VITE_BUNDLEGRAPH_RUNTIME?.trim();
 const configuredBase = import.meta.env.VITE_BUNDLEGRAPH_API_BASE?.trim();
 const API_BASE = configuredBase ? configuredBase.replace(/\/$/, '') : '';
 const OBSERVABILITY_ENDPOINT = import.meta.env.VITE_BUNDLEGRAPH_OBSERVABILITY_ENDPOINT?.trim();
-let fixtureGuidedDraft: DraftRequirements | null = null;
+const configuredTimeout = Number(import.meta.env.VITE_BUNDLEGRAPH_REQUEST_TIMEOUT_MS || 15_000);
+const DEFAULT_TIMEOUT_MS = Number.isFinite(configuredTimeout) && configuredTimeout >= 250 && configuredTimeout <= 60_000 ? configuredTimeout : 15_000;
+const fixture = createFixtureAdapter();
 
 export type FrontendRuntimeMode = 'fixture' | 'authoritative';
 export const frontendRuntime = {
@@ -23,131 +25,157 @@ export class ApiError extends Error implements ApiFailure {
   reason_code: string;
   correlation_id?: string;
   constructor(status: number, reasonCode: string, message: string, correlationId?: string) {
-    super(message);
-    this.status = status;
-    this.reason_code = reasonCode;
-    this.correlation_id = correlationId;
+    super(message); this.status = status; this.reason_code = reasonCode; this.correlation_id = correlationId;
   }
 }
 
-function cloneFixture<T>(value: T): T { return structuredClone(value); }
 function correlationId(): string { return `web-${crypto.randomUUID()}`; }
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
+function isString(value: unknown): value is string { return typeof value === 'string' && value.length > 0; }
+function isInteger(value: unknown): value is number { return typeof value === 'number' && Number.isInteger(value); }
 
 function reportFailure(error: ApiError, endpoint: string): void {
   if (!OBSERVABILITY_ENDPOINT) return;
-  const payload = JSON.stringify({ event: 'api_failure', endpoint, status: error.status, reason_code: error.reason_code, correlation_id: error.correlation_id, occurred_at: new Date().toISOString() });
-  navigator.sendBeacon?.(OBSERVABILITY_ENDPOINT, new Blob([payload], { type: 'application/json' }));
+  try {
+    const payload = JSON.stringify({ event: 'api_failure', endpoint, status: error.status, reason_code: error.reason_code, correlation_id: error.correlation_id, occurred_at: new Date().toISOString() });
+    navigator.sendBeacon?.(OBSERVABILITY_ENDPOINT, new Blob([payload], { type: 'application/json' }));
+  } catch { /* Telemetry must never replace the original failure. */ }
 }
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+function parseBody(text: string): unknown {
+  if (!text.trim()) return null;
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+function safeMessage(value: unknown, status: number): string {
+  if (typeof value === 'string') {
+    const normalized = value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (normalized && !value.includes('<html') && !value.includes('<!DOCTYPE')) return normalized.slice(0, 240);
+  }
+  if (status === 401) return 'Your session has ended. Sign in again to continue.';
+  if (status === 403) return 'You do not have access to this operation.';
+  if (status >= 500) return 'The BundleGraph service could not complete the request.';
+  return 'The request could not be completed.';
+}
+
+function invalidResponse(corr: string, endpoint: string): never {
+  const error = new ApiError(502, 'INVALID_API_RESPONSE', 'The server returned an invalid response. Reload before continuing.', corr);
+  reportFailure(error, endpoint); throw error;
+}
+
+type RequestOptions = RequestInit & { timeoutMs?: number };
+
+export async function requestJson(endpoint: string, options: RequestOptions = {}): Promise<unknown> {
   const token = getAccessToken();
   const corr = correlationId();
   if (!token) throw new ApiError(401, 'AUTHENTICATION_REQUIRED', 'Sign in to continue.');
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort('timeout'), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const abortFromCaller = () => controller.abort(options.signal?.reason || 'cancelled');
+  options.signal?.addEventListener('abort', abortFromCaller, { once: true });
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}${endpoint}`, { ...options, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Correlation-ID': corr, ...options.headers } });
+    response = await fetch(`${API_BASE}${endpoint}`, { ...options, signal: controller.signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Correlation-ID': corr, ...options.headers } });
   } catch {
-    const error = new ApiError(0, 'NETWORK_UNAVAILABLE', 'The BundleGraph service could not be reached.', corr);
-    reportFailure(error, endpoint);
-    throw error;
+    const timedOut = controller.signal.aborted && !options.signal?.aborted;
+    const error = new ApiError(0, timedOut ? 'REQUEST_TIMEOUT' : options.signal?.aborted ? 'REQUEST_CANCELLED' : 'NETWORK_UNAVAILABLE', timedOut ? 'The request timed out. It is safe to retry this read operation.' : options.signal?.aborted ? 'The obsolete request was cancelled.' : 'The BundleGraph service could not be reached.', corr);
+    reportFailure(error, endpoint); throw error;
+  } finally {
+    window.clearTimeout(timeout); options.signal?.removeEventListener('abort', abortFromCaller);
   }
   const responseCorrelation = response.headers.get('x-correlation-id') || corr;
+  const text = await response.text();
+  const payload = parseBody(text);
   if (!response.ok) {
     if (response.status === 401) clearSession();
-    let detail: unknown;
-    try { detail = await response.json(); } catch { detail = await response.text(); }
-    const nested = typeof detail === 'object' && detail !== null && 'detail' in detail ? (detail as { detail: unknown }).detail : detail;
-    const reason = typeof nested === 'object' && nested !== null && 'reason_code' in nested
-      ? String((nested as { reason_code: unknown }).reason_code)
-      : response.status === 409 ? 'STALE_RESOURCE_VERSION' : `HTTP_${response.status}`;
-    const missing = typeof nested === 'object' && nested !== null && 'missing_information' in nested && Array.isArray((nested as { missing_information: unknown }).missing_information)
-      ? (nested as { missing_information: unknown[] }).missing_information.map(String)
-      : [];
-    const message = typeof nested === 'string' ? nested : missing.length ? `Please resolve: ${missing.join(', ')}.` : response.statusText || 'The request could not be completed.';
-    const error = new ApiError(response.status, reason, message || response.statusText, responseCorrelation);
-    reportFailure(error, endpoint);
-    throw error;
+    const nested = isRecord(payload) && 'detail' in payload ? payload.detail : payload;
+    const reason = isRecord(nested) && isString(nested.reason_code) ? nested.reason_code : response.status === 409 ? 'STALE_RESOURCE_VERSION' : `HTTP_${response.status}`;
+    const missing = isRecord(nested) && Array.isArray(nested.missing_information) ? nested.missing_information.filter(isString) : [];
+    const message = missing.length ? `Please resolve: ${missing.join(', ')}.` : safeMessage(isRecord(nested) && 'message' in nested ? nested.message : nested, response.status);
+    const error = new ApiError(response.status, reason, message, responseCorrelation);
+    reportFailure(error, endpoint); throw error;
   }
-  return response.json() as Promise<T>;
+  if (payload === null) invalidResponse(responseCorrelation, endpoint);
+  return payload;
 }
 
-function fixtureApproval(planId: string, amountMinor: number, currency: string): ApprovalRecord {
-  return { approval_id: 'fixture-approval-v1', plan_id: planId, plan_version: '1', amount_minor: amountMinor, currency, status: 'SIMULATED_FIXTURE_APPROVAL', created_at: '2026-01-01T00:00:00Z', valid: true };
+function asInterpretation(value: unknown): RequirementInterpretation {
+  if (!isRecord(value) || !isRecord(value.draft) || !isString(value.draft.request_reference) || !Array.isArray(value.missing_information) || !Array.isArray(value.clarification_questions) || !isString(value.provider_mode)) invalidResponse('', '/requirement-drafts/interpret');
+  return value as unknown as RequirementInterpretation;
+}
+
+function asGuided(value: unknown): { draft: RequirementInterpretation['draft']; version: number; clarification_questions: string[]; can_confirm: boolean } {
+  if (!isRecord(value) || !isRecord(value.draft) || !isString(value.draft.request_reference) || !isInteger(value.version) || !Array.isArray(value.clarification_questions) || typeof value.can_confirm !== 'boolean') invalidResponse('', '/requirement-drafts/guided');
+  return value as unknown as { draft: RequirementInterpretation['draft']; version: number; clarification_questions: string[]; can_confirm: boolean };
+}
+
+function asConfirmed(value: unknown): ConfirmedRequirements {
+  if (!isRecord(value) || !isString(value.confirmation_reference) || !isRecord(value.requirements) || !isString(value.requirements.confirmation_reference)) invalidResponse('', '/confirm');
+  return value.requirements as unknown as ConfirmedRequirements;
+}
+
+function asPlan(value: unknown): AuthoritativePlan {
+  if (!isRecord(value) || !isRecord(value.plan) || !isString(value.plan.plan_id) || !isInteger(value.plan.current_version) || !Array.isArray(value.plan.versions)) invalidResponse('', '/plans');
+  return value.plan as unknown as AuthoritativePlan;
+}
+
+function asGeneration(value: unknown) {
+  if (!isRecord(value) || !isString(value.status) || !Array.isArray(value.reason_codes) || !isRecord(value.result) || !Array.isArray(value.result.proposals) || !isString(value.result.search_status)) invalidResponse('', '/bundle-plans/generate');
+  return value as unknown as { status: string; reason_codes: string[]; result: { proposals: BundleProposal[]; search_status: string; evaluated_candidates?: number; infeasibility?: { reason_codes: string[]; explanation?: string } | null } };
+}
+
+function translateFixture<T>(action: () => Promise<T>): Promise<T> {
+  return action().catch((error) => {
+    if (error instanceof FixtureContractError) throw new ApiError(error.status, error.reason_code, error.message, 'synthetic-fixture');
+    throw error;
+  });
 }
 
 export const api = {
-  async getPresets(): Promise<PresetScenario[]> { return cloneFixture(OFFLINE_PRESETS); },
-
-  async interpretRequirements(message: string, requestReference = `req-${crypto.randomUUID()}`): Promise<RequirementInterpretation> {
-    if (frontendRuntime.mode === 'fixture') return { ...cloneFixture(SAMPLE_INTERPRETATION), draft: { ...cloneFixture(SAMPLE_INTERPRETATION.draft), request_reference: requestReference, use_case: message.slice(0, 80) }, provider_mode: 'synthetic_fixture', version: 1, can_confirm: true };
-    return request('/requirement-drafts/interpret', { method: 'POST', body: JSON.stringify({ message, request_reference: requestReference }) });
+  async getPresets(): Promise<PresetScenario[]> { return fixture.getPresets(); },
+  async interpretRequirements(message: string, requestReference = `req-${crypto.randomUUID()}`, signal?: AbortSignal): Promise<RequirementInterpretation> {
+    if (frontendRuntime.mode === 'fixture') return translateFixture(() => fixture.interpret(message, requestReference));
+    return asInterpretation(await requestJson('/requirement-drafts/interpret', { method: 'POST', body: JSON.stringify({ message, request_reference: requestReference }), signal }));
   },
-
-  async saveGuidedDraft(params: { request_reference: string; use_case: string; participants: number; budget_minor: number; currency: string; laptop_connectors: string[]; monitoring: string; deadline?: string }): Promise<{ draft: RequirementInterpretation['draft']; version: number; clarification_questions: string[]; can_confirm: boolean }> {
-    if (frontendRuntime.mode === 'fixture') {
-      const listening = ({ independent: 'independent_headphones', shared: 'shared_headphones', none: 'no_monitoring' } as Record<string, string>)[params.monitoring] || null;
-      const missing = [params.use_case !== 'two-person podcast' ? 'supported use case' : null, params.participants !== 2 ? 'supported participant topology' : null, params.budget_minor <= 0 ? 'budget' : null, params.laptop_connectors.includes('unknown') ? 'laptop connector' : null, !listening ? 'monitoring requirement' : null].filter((item): item is string => Boolean(item));
-      fixtureGuidedDraft = {
-        request_reference: params.request_reference, use_case: params.use_case, participants: params.participants,
-        budget: { amount_minor: params.budget_minor, currency: params.currency },
-        required_quantities: [{ category: 'microphone', quantity: params.participants }, { category: 'audio_interface', quantity: 1 }, { category: 'xlr_cable', quantity: params.participants }, { category: 'headphones', quantity: params.participants }],
-        laptop_connectors: params.laptop_connectors.filter((item) => item !== 'unknown').map((connector) => ({ connector })),
-        listening_requirement: listening, deadline: params.deadline || null, missing_information: missing,
-      };
-      return { draft: cloneFixture(fixtureGuidedDraft), version: 2, clarification_questions: missing.map((item) => `Please resolve ${item}.`), can_confirm: !missing.length };
-    }
-    return request('/requirement-drafts/guided', { method: 'POST', body: JSON.stringify(params) });
+  async saveGuidedDraft(params: { request_reference: string; use_case: string | null; participants: number | null; budget_minor: number | null; currency: string | null; laptop_connectors: string[]; monitoring: string | null; deadline?: string }, signal?: AbortSignal) {
+    if (frontendRuntime.mode === 'fixture') return translateFixture(() => fixture.saveGuided(params));
+    return asGuided(await requestJson('/requirement-drafts/guided', { method: 'POST', body: JSON.stringify(params), signal }));
   },
-
   async confirmDraft(requestReference: string, expectedVersion: number): Promise<ConfirmedRequirements> {
-    if (frontendRuntime.mode === 'fixture') {
-      const draft = fixtureGuidedDraft;
-      if (!draft || draft.request_reference !== requestReference || draft.missing_information.length || !draft.use_case || draft.participants === null || !draft.budget || !draft.listening_requirement) return cloneFixture(SAMPLE_CONFIRMED_REQ);
-      return { request_reference: draft.request_reference, confirmation_reference: `fixture-confirmed-v${expectedVersion}`, use_case: draft.use_case, participants: draft.participants, budget: draft.budget, required_quantities: draft.required_quantities, laptop_connectors: draft.laptop_connectors, listening_requirement: draft.listening_requirement, deadline: draft.deadline || null };
-    }
-    const response = await request<{ confirmation_reference: string; requirements: ConfirmedRequirements }>(`/requirement-drafts/${encodeURIComponent(requestReference)}/confirm`, { method: 'POST', body: JSON.stringify({ expected_version: expectedVersion }) });
-    return response.requirements;
+    if (frontendRuntime.mode === 'fixture') return translateFixture(() => fixture.confirm(requestReference, expectedVersion));
+    return asConfirmed(await requestJson(`/requirement-drafts/${encodeURIComponent(requestReference)}/confirm`, { method: 'POST', body: JSON.stringify({ expected_version: expectedVersion }) }));
   },
-
-  async generateBundlePlans(requirements: ConfirmedRequirements): Promise<{ status: string; reason_codes: string[]; result: { proposals: BundleProposal[]; search_status: string; evaluated_candidates?: number; infeasibility?: { reason_codes: string[] } | null } }> {
-    if (frontendRuntime.mode === 'fixture') return { status: 'ok', reason_codes: [], result: { proposals: [cloneFixture(SAMPLE_PROPOSAL)], search_status: 'fixture_completed', evaluated_candidates: 1 } };
-    return request('/bundle-plans/generate', { method: 'POST', body: JSON.stringify({ schema_version: '1.0', correlation_id: correlationId(), confirmation_reference: requirements.confirmation_reference }) });
+  async generateBundlePlans(requirements: ConfirmedRequirements, signal?: AbortSignal) {
+    if (frontendRuntime.mode === 'fixture') return translateFixture(() => fixture.generate(requirements));
+    return asGeneration(await requestJson('/bundle-plans/generate', { method: 'POST', body: JSON.stringify({ schema_version: '1.0', correlation_id: correlationId(), confirmation_reference: requirements.confirmation_reference }), signal }));
   },
-
   async persistPlan(requirements: ConfirmedRequirements, proposalKey: string): Promise<AuthoritativePlan> {
-    if (frontendRuntime.mode === 'fixture') {
-      const total = SAMPLE_PROPOSAL.cost_breakdown.all_in_total || SAMPLE_PROPOSAL.cost_breakdown.merchandise_subtotal;
-      return { plan_id: SAMPLE_PROPOSAL.proposal_key, status: 'awaiting_approval', current_version: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), versions: [{ plan_id: SAMPLE_PROPOSAL.proposal_key, version: 1, fingerprint: 'fixture-fingerprint-v1', created_at: new Date().toISOString(), confirmation_reference: requirements.confirmation_reference, correlation_id: 'fixture-correlation', line_items: [], total, merchant_allocations: [], payload: {} }] };
-    }
-    const response = await request<{ plan: AuthoritativePlan }>('/plans', { method: 'POST', body: JSON.stringify({ schema_version: '1.0', correlation_id: correlationId(), confirmation_reference: requirements.confirmation_reference, proposal_key: proposalKey }) });
-    return response.plan;
+    if (frontendRuntime.mode === 'fixture') return translateFixture(() => fixture.persist(requirements, proposalKey));
+    return asPlan(await requestJson('/plans', { method: 'POST', body: JSON.stringify({ schema_version: '1.0', correlation_id: correlationId(), confirmation_reference: requirements.confirmation_reference, proposal_key: proposalKey }) }));
   },
-
-  async getPlanEvidence(planId: string): Promise<EvidenceRecord[]> {
-    if (frontendRuntime.mode === 'fixture') return [];
-    const response = await request<{ evidence: EvidenceRecord[] }>(`/bundle-plans/${encodeURIComponent(planId)}/evidence?correlation_id=${encodeURIComponent(correlationId())}`);
-    return response.evidence;
+  async getPlanEvidence(planId: string, signal?: AbortSignal): Promise<EvidenceRecord[]> {
+    if (frontendRuntime.mode === 'fixture') return fixture.evidence();
+    const value = await requestJson(`/bundle-plans/${encodeURIComponent(planId)}/evidence?correlation_id=${encodeURIComponent(correlationId())}`, { signal });
+    if (!isRecord(value) || !Array.isArray(value.evidence)) invalidResponse('', '/evidence');
+    return value.evidence as EvidenceRecord[];
   },
-
   async createApproval(plan: AuthoritativePlan): Promise<ApprovalRecord> {
+    if (frontendRuntime.mode === 'fixture') return translateFixture(() => fixture.approve(plan));
     const head = plan.versions.find((version) => version.version === plan.current_version);
     if (!head) throw new ApiError(409, 'PLAN_VERSION_MISSING', 'The selected plan version is unavailable.');
-    if (frontendRuntime.mode === 'fixture') return fixtureApproval(plan.plan_id, head.total.amount_minor, head.total.currency);
-    const response = await request<{ approval: { approval_id: string; plan_id: string; plan_version: number; plan_fingerprint: string; status: string; granted_at?: string; permitted_total: { amount_minor: number; currency: string } } }>('/approvals', { method: 'POST', body: JSON.stringify({ plan_id: plan.plan_id, plan_version: head.version, plan_fingerprint: head.fingerprint, permitted_total: head.total }) });
-    return { approval_id: response.approval.approval_id, plan_id: response.approval.plan_id, plan_version: String(response.approval.plan_version), plan_fingerprint: response.approval.plan_fingerprint, amount_minor: response.approval.permitted_total.amount_minor, currency: response.approval.permitted_total.currency, status: response.approval.status, created_at: response.approval.granted_at || new Date().toISOString(), valid: response.approval.status === 'granted' };
+    const value = await requestJson('/approvals', { method: 'POST', body: JSON.stringify({ plan_id: plan.plan_id, plan_version: head.version, plan_fingerprint: head.fingerprint, permitted_total: head.total }) });
+    if (!isRecord(value) || !isRecord(value.approval) || !isString(value.approval.approval_id) || !isInteger(value.approval.plan_version) || !isRecord(value.approval.permitted_total)) invalidResponse('', '/approvals');
+    const approval = value.approval;
+    const permittedTotal = approval.permitted_total as Record<string, unknown>;
+    return { approval_id: approval.approval_id as string, plan_id: approval.plan_id as string, plan_version: String(approval.plan_version), plan_fingerprint: approval.plan_fingerprint as string, amount_minor: permittedTotal.amount_minor as number, currency: permittedTotal.currency as string, status: approval.status as string, created_at: typeof approval.granted_at === 'string' ? approval.granted_at : new Date().toISOString(), valid: approval.status === 'granted' };
   },
-
   async replanBundle(plan: AuthoritativePlan, failedOfferId: string): Promise<ReplanResult> {
-    if (frontendRuntime.mode === 'fixture') return cloneFixture(SAMPLE_REPLAN_RESULT);
-    return request(`/plans/${encodeURIComponent(plan.plan_id)}/replan-proposals`, { method: 'POST', body: JSON.stringify({ expected_plan_version: plan.current_version, failed_offer_ids: [failedOfferId] }) });
+    if (frontendRuntime.mode === 'fixture') return translateFixture(() => fixture.replan(plan, failedOfferId));
+    return await requestJson(`/plans/${encodeURIComponent(plan.plan_id)}/replan-proposals`, { method: 'POST', body: JSON.stringify({ expected_plan_version: plan.current_version, failed_offer_ids: [failedOfferId] }) }) as ReplanResult;
   },
-
   async simulateExecution(params: { approval_id: string; plan_id: string; plan_version: string; amount_minor: number; currency: string; inject_failure_offer_id?: string }): Promise<ExecutionRecord> {
     if (frontendRuntime.mode !== 'fixture') throw new ApiError(409, 'PAYMENT_EXECUTION_NOT_ENABLED', 'Payment execution is not enabled in the application runtime.');
-    return params.inject_failure_offer_id
-      ? { execution_status: 'FAILED_MERCHANT_STOCK_OUTAGE', plan_id: params.plan_id, approval_id: params.approval_id, approval_invalidated: true, failed_offer_id: params.inject_failure_offer_id, message: `Synthetic stock outage for ${params.inject_failure_offer_id}. No transaction was attempted.`, replan_recommended: true }
-      : { execution_status: 'COMPLETED', transaction_id: 'fixture-transaction-v1', plan_id: params.plan_id, amount_minor: params.amount_minor, currency: params.currency, settled_at: '2026-01-01T00:00:00Z', approval_id: params.approval_id, message: 'Synthetic fixture execution completed. No payment provider was called.' };
+    return fixture.execute(params);
   },
-
-  async resetDemo(): Promise<void> { fixtureGuidedDraft = null; },
+  async resetDemo(): Promise<void> { await fixture.reset(); },
 };

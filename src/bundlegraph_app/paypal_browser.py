@@ -30,6 +30,10 @@ from .state import (
 class BrowserPaymentError(RuntimeError):
     """Raised for caller mistakes while driving the browser payment journey."""
 
+    def __init__(self, message: str, reason_code: str = "BROWSER_PAYMENT_REJECTED") -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+
 
 @dataclass(frozen=True, slots=True)
 class CreatedOrder:
@@ -77,9 +81,6 @@ class BrowserPaymentOrchestrator:
         operation_id: str,
         merchant_allocation_id: str,
     ) -> CreatedOrder:
-        existing = self._payments.get(operation_id)
-        if existing is not None:
-            return self._as_created(existing)
         approval = self._approvals.get(approval_id)
         if approval is None or approval.status is not ApprovalStatus.GRANTED:
             raise BrowserPaymentError("approval not found or no longer granted")
@@ -90,19 +91,7 @@ class BrowserPaymentOrchestrator:
         if head.fingerprint != approval.plan_fingerprint:
             raise BrowserPaymentError("approval no longer matches the current plan version")
         allocation = _lookup_allocation(head.merchant_allocations, merchant_allocation_id)
-        if any(
-            op.kind is PaymentOperationKind.AUTHORIZE
-            and op.plan_version == head.version
-            and op.merchant_allocation_id == allocation.allocation_id
-            and op.status in {PaymentOperationStatus.SUBMITTED, PaymentOperationStatus.UNCERTAIN, PaymentOperationStatus.SUCCEEDED}
-            for op in self._payments.list_for_plan(plan.plan_id)
-        ):
-            raise BrowserPaymentError("merchant allocation already has an active or successful authorization")
         request_id = PayPalAdapter.idempotency_key(operation_id, PaymentOperationKind.AUTHORIZE)
-        try:
-            order = self._orders.create_order(amount=allocation.amount, request_id=request_id)
-        except PayPalSandboxProtocolError as exc:
-            raise BrowserPaymentError(f"PayPal rejected create-order: {exc}") from exc
         now = self._now()
         operation = PaymentOperation(
             operation_id=operation_id,
@@ -115,17 +104,33 @@ class BrowserPaymentOrchestrator:
             recipient_reference=allocation.merchant_reference,
             amount=allocation.amount,
             merchant_allocation_id=allocation.allocation_id,
-            provider_reference=order.order_id,
             submitted_at=now,
         )
-        stored, created = self._payments.create_if_absent(operation)
+        existing = self._payments.get(operation_id)
+        if existing is not None:
+            _require_same_request(existing, operation)
+            return self._as_created(existing)
+        try:
+            stored, created = self._payments.reserve(operation)
+        except ValueError as exc:
+            raise BrowserPaymentError("payment capacity is already reserved") from exc
         if not created:
+            _require_same_request(stored, operation)
             return self._as_created(stored)
         if plan.status is PlanStatus.APPROVED:
             ensure_plan_transition(plan.status, PlanStatus.EXECUTING)
             plan.status = PlanStatus.EXECUTING
             plan.updated_at = now
             self._plans.save(plan)
+        try:
+            order = self._orders.create_order(amount=allocation.amount, request_id=request_id)
+        except PayPalSandboxProtocolError as exc:
+            stored.status = PaymentOperationStatus.UNCERTAIN
+            stored.failure_reason_code = "CREATE_ORDER_OUTCOME_UNKNOWN"
+            self._payments.save(stored)
+            raise BrowserPaymentError(f"PayPal rejected create-order: {exc}") from exc
+        stored.provider_reference = order.order_id
+        self._payments.save(stored)
         return CreatedOrder(
             operation_id=stored.operation_id,
             order_id=order.order_id,
@@ -166,7 +171,10 @@ class BrowserPaymentOrchestrator:
             parent_operation_id=authorize_op.operation_id,
             submitted_at=now,
         )
-        capture_operation, created = self._payments.create_if_absent(capture_operation)
+        try:
+            capture_operation, created = self._payments.reserve(capture_operation)
+        except ValueError as exc:
+            raise BrowserPaymentError("authorization already has an active capture") from exc
         if not created:
             return self._as_completed(authorize_op, order_id, authorization_id, capture_operation)
         try:
@@ -179,6 +187,7 @@ class BrowserPaymentOrchestrator:
             self._mark_failed(capture_operation, reason_code="CAPTURE_REJECTED")
             raise BrowserPaymentError(f"PayPal rejected capture: {exc}") from exc
         self._mark_succeeded(capture_operation, provider_reference=capture_id)
+        self._refresh_plan_after_capture(capture_operation)
         return self._as_completed(authorize_op, order_id, authorization_id, capture_operation)
 
     def cancel_order(self, *, operation_id: str) -> PaymentOperation:
@@ -234,6 +243,23 @@ class BrowserPaymentOrchestrator:
             merchant_reference=operation.recipient_reference,
         )
 
+    def _refresh_plan_after_capture(self, operation: PaymentOperation) -> None:
+        plan = self._plans.get(operation.plan_id)
+        if plan is None or plan.current_version != operation.plan_version or plan.status is not PlanStatus.EXECUTING:
+            return
+        captured = {
+            item.merchant_allocation_id
+            for item in self._payments.list_for_plan(plan.plan_id)
+            if item.plan_version == plan.current_version
+            and item.kind is PaymentOperationKind.CAPTURE
+            and item.status is PaymentOperationStatus.SUCCEEDED
+        }
+        if {item.allocation_id for item in plan.head().merchant_allocations}.issubset(captured):
+            ensure_plan_transition(plan.status, PlanStatus.EXECUTED)
+            plan.status = PlanStatus.EXECUTED
+            plan.updated_at = self._now()
+            self._plans.save(plan)
+
     def _as_completed(
         self,
         authorize_op: PaymentOperation,
@@ -258,6 +284,12 @@ def _lookup_allocation(allocations: tuple[MerchantAllocation, ...], allocation_i
     if match is None:
         raise BrowserPaymentError("merchant_allocation_id does not belong to the current plan version")
     return match
+
+
+def _require_same_request(existing: PaymentOperation, expected: PaymentOperation) -> None:
+    fields = ("kind", "parent_operation_id", "plan_id", "plan_version", "approval_id", "merchant_allocation_id", "amount", "recipient_reference")
+    if any(getattr(existing, field) != getattr(expected, field) for field in fields):
+        raise BrowserPaymentError("operation_id was reused for a different immutable payment request", "IDEMPOTENCY_MISMATCH")
 
 
 def new_browser_operation_id() -> str:
