@@ -146,8 +146,11 @@ docker compose -f compose.sandbox.yml down --volumes
 
 The authenticated API also exposes draft-only `POST /candidates/discover` and
 non-authoritative `POST /plans/{plan_id}/replan-proposals`. Applying a selected
-replacement remains a separate call that creates a new plan version and requires
-new approval.
+replacement is a separate call that accepts only a server-generated
+`replacement_proposal_key` plus the reviewed source version and failure facts; it
+regenerates the candidate from authoritative state, creates a new plan version,
+and requires new approval. `POST /plans` also accepts an optional owner-scoped
+`idempotency_key` for lost-response retries.
 
 `BUNDLEGRAPH_MODE=demo` remains the default, offline fixture-only UI. `BUNDLEGRAPH_MODE=production` still fails closed until the documented real PayPal Orders and webhook-verification adapters are available. `/healthz` is liveness; `/readyz` reports persistence, authentication, active catalog, PayPal, and webhook readiness. See [Member 2 deployment](docs/member2/deployment.md).
 

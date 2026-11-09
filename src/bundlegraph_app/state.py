@@ -127,11 +127,13 @@ class Plan(BaseModel):
     updated_at: datetime
     current_version: int
     versions: list[PlanVersion]
+    creation_idempotency_key: str | None = None
+    creation_request_fingerprint: str | None = None
 
     @field_validator("created_at", "updated_at")
     @classmethod
-    def _tz(cls, value: datetime) -> datetime:
-        return _tz_required(value)
+    def _tz(cls, value: datetime | None) -> datetime | None:
+        return _tz_required(value) if value is not None else None
 
     def head(self) -> PlanVersion:
         for version in self.versions:
@@ -196,7 +198,7 @@ class PaymentOperation(BaseModel):
 class WebhookEvent(BaseModel):
     """A received PayPal webhook event. Replay-safe: duplicates ignored by id."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=False)
 
     event_id: str = Field(min_length=1)
     event_type: str = Field(min_length=1)
@@ -205,11 +207,13 @@ class WebhookEvent(BaseModel):
     resource_reference: str = Field(min_length=1)
     operation_id: str | None = None
     raw_payload_fingerprint: str = Field(min_length=16)
+    processed_at: datetime | None = None
+    processing_error_code: str | None = None
 
-    @field_validator("received_at")
+    @field_validator("received_at", "processed_at")
     @classmethod
-    def _tz(cls, value: datetime) -> datetime:
-        return _tz_required(value)
+    def _tz(cls, value: datetime | None) -> datetime | None:
+        return _tz_required(value) if value is not None else None
 
 
 # ---------------------------------------------------------------------------

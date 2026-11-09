@@ -3,127 +3,42 @@ import { AgGridReact } from 'ag-grid-react';
 import { ClientSideRowModelModule, ModuleRegistry, TextFilterModule, type ColDef } from 'ag-grid-community';
 import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-quartz.css';
-import type { BundleProposal } from '../../types/bundlegraph';
-import { Table } from 'lucide-react';
+import type { BundleProposal, Money } from '../../types/bundlegraph';
 
 ModuleRegistry.registerModules([ClientSideRowModelModule, TextFilterModule]);
 
-interface BundleGridProps {
-  proposal: BundleProposal | null;
-}
+interface GridRowData { category: string; productName: string; productId: string; offerId: string; quantity: number; unitPrice: string; lineTotal: string; evidence: string; }
+const money = (value: Money) => new Intl.NumberFormat(undefined, { style: 'currency', currency: value.currency }).format(value.amount_minor / 100);
 
-interface GridRowData {
-  category: string;
-  productId: string;
-  productName: string;
-  offerId: string;
-  quantity: number;
-  unitPrice: string;
-  lineTotal: string;
-  availability: string;
-  status: string;
-}
-
-export const BundleGrid: React.FC<BundleGridProps> = ({ proposal }) => {
-  const rowData: GridRowData[] = useMemo(() => {
+export const BundleGrid: React.FC<{ proposal: BundleProposal | null }> = ({ proposal }) => {
+  const rows = useMemo<GridRowData[]>(() => {
     if (!proposal) return [];
-
-    const categoryMap: Record<string, string> = {
-      'mic-alpha': 'Microphone',
-      'mic-phantom': 'Microphone',
-      'mic-gamma': 'Microphone',
-      'interface-one': 'Audio Interface',
-      'interface-two': 'Audio Interface',
-      'interface-conflict': 'Audio Interface',
-      'headphones-alpha': 'Headphones',
-      'headphones-bravo': 'Headphones',
-      'xlr-alpha': 'XLR Cable',
-      'xlr-bravo': 'XLR Cable',
-      'usb-a-to-c': 'USB Adapter',
-      'usb-c-to-a': 'USB Adapter',
-    };
-
-    const nameMap: Record<string, string> = {
-      'mic-alpha': 'Synthetic Mic Alpha (Dynamic XLR)',
-      'mic-phantom': 'Synthetic Mic Phantom (+48V Required)',
-      'mic-gamma': 'Synthetic Mic Gamma (Dynamic XLR)',
-      'interface-one': 'Synthetic Interface One (1 XLR Input)',
-      'interface-two': 'Synthetic Interface Two (2 XLR Inputs)',
-      'headphones-alpha': 'Synthetic Headphones Alpha (3.5mm TRS)',
-      'headphones-bravo': 'Synthetic Headphones Bravo (3.5mm TRS)',
-      'xlr-alpha': 'Synthetic XLR Cable Alpha (3m balanced)',
-      'xlr-bravo': 'Synthetic XLR Cable Bravo (3m balanced)',
-    };
-
-    return proposal.line_items.map((item) => ({
-      category: categoryMap[item.product_id] || 'Audio Hardware',
-      productId: item.product_id,
-      productName: nameMap[item.product_id] || item.product_id,
-      offerId: item.offer_id,
-      quantity: item.quantity,
-      unitPrice: `$${(item.unit_price.amount_minor / 100).toFixed(2)}`,
-      lineTotal: `$${(item.merchandise_total.amount_minor / 100).toFixed(2)}`,
-      availability: 'See authoritative offer evidence',
-      status: proposal.compatibility_report.classification,
-    }));
+    const nodes = new Map(proposal.compatibility_report.nodes.map((node) => [node.node_id.replace(/^product:/, ''), node]));
+    return proposal.line_items.map((item) => {
+      const node = nodes.get(item.product_id);
+      const evidence = proposal.compatibility_report.findings.filter((finding) => finding.affected_product_ids.includes(item.product_id)).flatMap((finding) => finding.evidence_ids);
+      return {
+        category: String(node?.data.role || node?.data.category || 'Equipment'),
+        productName: String(node?.data.name || item.product_id),
+        productId: item.product_id,
+        offerId: item.offer_id,
+        quantity: item.quantity,
+        unitPrice: money(item.unit_price),
+        lineTotal: money(item.merchandise_total),
+        evidence: [...new Set(evidence)].join(', ') || 'No evidence reference',
+      };
+    });
   }, [proposal]);
-
-  const columnDefs: ColDef<GridRowData>[] = useMemo(() => [
-    { field: 'category', headerName: 'Category', width: 140, filter: true },
-    { field: 'productName', headerName: 'Product Name', flex: 1, minWidth: 220, filter: true },
-    { field: 'quantity', headerName: 'Qty', width: 85, sortable: true },
-    { field: 'unitPrice', headerName: 'Unit Price', width: 115, sortable: true },
-    { field: 'lineTotal', headerName: 'Line Total', width: 115, sortable: true },
-    { field: 'offerId', headerName: 'Merchant SKU', width: 155 },
-    {
-      field: 'status',
-      headerName: 'Rule Verification',
-      width: 175,
-      cellRenderer: (params: { value: string }) => {
-        const verified = params.value === 'verified_complete';
-        return (
-          <span className={`badge ${verified ? 'badge-emerald' : 'badge-amber'}`} style={{ marginTop: '7px' }}>
-            {params.value}
-          </span>
-        );
-      },
-    },
+  const columns = useMemo<ColDef<GridRowData>[]>(() => [
+    { field: 'category', headerName: 'Category', minWidth: 130 },
+    { field: 'productName', headerName: 'Product', flex: 1, minWidth: 190, filter: true },
+    { field: 'quantity', headerName: 'Qty', width: 80 },
+    { field: 'unitPrice', headerName: 'Unit price', width: 115 },
+    { field: 'lineTotal', headerName: 'Line total', width: 115 },
+    { field: 'offerId', headerName: 'Offer reference', minWidth: 155 },
   ], []);
 
-  if (!proposal) {
-    return (
-      <div className="surface-panel" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-        No bundle proposal selected for tabular comparison.
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ width: '100%', marginTop: '0.25rem' }}>
-      <div className="ag-theme-quartz-dark" style={{ height: 320, width: '100%', borderRadius: 'var(--radius-sm)', overflow: 'hidden', border: '1px solid var(--border-default)' }}>
-        <AgGridReact
-          theme="legacy"
-          rowData={rowData}
-          columnDefs={columnDefs}
-          defaultColDef={{
-            sortable: true,
-            resizable: true,
-          }}
-        />
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem', padding: '0.5rem 0.875rem', backgroundColor: 'var(--bg-card-subtle)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          <Table size={13} style={{ color: 'var(--text-primary)' }} />
-          <span>AG Grid Community Matrix • Hardware Line Items</span>
-        </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <span>{proposal.line_items.length} line items</span>
-          <span>•</span>
-          <span>Single Currency (USD)</span>
-          <span>•</span>
-          <span style={{ color: 'var(--status-emerald)', fontWeight: 600 }}>Integer Cents Verified</span>
-        </div>
-      </div>
-    </div>
-  );
+  if (!proposal) return <div className="empty-state-panel"><p>Select a bundle to inspect its equipment.</p></div>;
+  if (rows.length <= 6) return <div className="equipment-table-wrap"><table className="equipment-table"><thead><tr><th>Equipment</th><th>Category</th><th>Qty</th><th>Unit price</th><th>Line total</th><th>Details</th></tr></thead><tbody>{rows.map((row) => <tr key={row.offerId}><td><strong>{row.productName}</strong><small>{row.productId}</small></td><td>{row.category}</td><td>{row.quantity}</td><td>{row.unitPrice}</td><td>{row.lineTotal}</td><td><details><summary>Evidence</summary><p>{row.evidence}</p><p>Offer: {row.offerId}</p></details></td></tr>)}</tbody></table></div>;
+  return <div className="equipment-grid ag-theme-quartz"><AgGridReact theme="legacy" rowData={rows} columnDefs={columns} defaultColDef={{ sortable: true, resizable: true }} domLayout="autoHeight" /></div>;
 };

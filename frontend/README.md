@@ -33,6 +33,18 @@ The authoritative journey is draft → clarification/review → confirmation →
 proposal generation → persisted plan/evidence → exact-version approval → replan.
 Application mode deliberately does not execute payments.
 
+## Interface architecture
+
+The browser uses one task-oriented workspace with a responsive workflow rail,
+contextual setup summary, and the existing five screen identifiers. Technical
+identifiers, evidence provenance, and API diagnostics remain available through
+accessible disclosures instead of dominating the primary workflow.
+
+`motion` is the only animation dependency. It is limited to short workflow,
+candidate-selection, evidence-detail, notice, and recovery transitions and is
+configured to honor the user's reduced-motion preference. Compatibility graphs,
+tables, forms, and provider activity are never animated as proof of real work.
+
 ## Checks
 
 ```powershell

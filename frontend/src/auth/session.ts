@@ -22,20 +22,23 @@ function randomValue(size = 32): string {
 }
 
 export function setSession(accessToken: string, expiresInSeconds = 900): void {
-  sessionStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-  sessionStorage.setItem(EXPIRES_AT_KEY, String(Date.now() + expiresInSeconds * 1000));
+  if (!accessToken || !Number.isFinite(expiresInSeconds) || expiresInSeconds <= 0) throw new Error('Invalid session response');
+  try {
+    sessionStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+    sessionStorage.setItem(EXPIRES_AT_KEY, String(Date.now() + expiresInSeconds * 1000));
+  } catch { throw new Error('Browser session storage is unavailable'); }
   window.dispatchEvent(new Event('bundlegraph:auth-changed'));
 }
 
 export function clearSession(): void {
-  sessionStorage.removeItem(ACCESS_TOKEN_KEY);
-  sessionStorage.removeItem(EXPIRES_AT_KEY);
+  try { sessionStorage.removeItem(ACCESS_TOKEN_KEY); sessionStorage.removeItem(EXPIRES_AT_KEY); } catch { /* Already unauthenticated if storage is unavailable. */ }
   window.dispatchEvent(new Event('bundlegraph:auth-changed'));
 }
 
 export function getAccessToken(): string | null {
-  const token = sessionStorage.getItem(ACCESS_TOKEN_KEY);
-  const expiresAt = Number(sessionStorage.getItem(EXPIRES_AT_KEY) || 0);
+  let token: string | null; let expiresAt: number;
+  try { token = sessionStorage.getItem(ACCESS_TOKEN_KEY); expiresAt = Number(sessionStorage.getItem(EXPIRES_AT_KEY) || 0); }
+  catch { return null; }
   if (!token || !expiresAt || expiresAt <= Date.now()) {
     if (token) clearSession();
     return null;
@@ -44,8 +47,8 @@ export function getAccessToken(): string | null {
 }
 
 export function sessionExpiresAt(): number | null {
-  const value = Number(sessionStorage.getItem(EXPIRES_AT_KEY) || 0);
-  return value || null;
+  try { const value = Number(sessionStorage.getItem(EXPIRES_AT_KEY) || 0); return Number.isFinite(value) && value > 0 ? value : null; }
+  catch { return null; }
 }
 
 export async function beginSignIn(): Promise<void> {

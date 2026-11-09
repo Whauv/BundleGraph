@@ -1,4 +1,5 @@
 import hashlib
+from datetime import UTC, datetime
 
 import pytest
 
@@ -7,7 +8,7 @@ from bundlegraph.models import ConfirmedRequirements
 from bundlegraph.selection import BundleSelectionRequest, select_bundles
 from bundlegraph_app.auth import ConfiguredBearerAuthenticationProvider, Identity, InMemoryResourceOwnershipRepository, OidcIntrospectionAuthenticationProvider
 from bundlegraph_app.config import application_settings
-from bundlegraph_app.requirements import build_guided_draft
+from bundlegraph_app.requirements import InMemoryRequirementDraftRepository, StaleDraftError, build_guided_draft, new_draft_record
 from bundlegraph_app.manage import local_demo_catalog
 
 
@@ -30,6 +31,30 @@ def test_guided_answers_preserve_unknowns_for_clarification() -> None:
 
     assert set(draft.missing_information) == {"budget", "laptop connector", "monitoring requirement", "participant count", "use case"}
     assert draft.required_quantities == ()
+
+
+def test_draft_compare_and_swap_rejects_stale_edit_and_preserves_created_at() -> None:
+    repository = InMemoryRequirementDraftRepository()
+    first_draft = build_guided_draft(request_reference="req-cas", use_case="Two-person podcast", participants=2, budget_minor=90_000, currency="USD", laptop_connectors=("usb-c",), monitoring="independent")
+    first = new_draft_record("user-1", 1, first_draft, (), now=datetime(2026, 1, 1, tzinfo=UTC))
+    repository.save(first, expected_version=None)
+    second = new_draft_record("user-1", 2, first_draft, (), now=datetime(2026, 1, 2, tzinfo=UTC), created_at=first.created_at)
+    repository.save(second, expected_version=1)
+    with pytest.raises(StaleDraftError):
+        repository.save(second, expected_version=1)
+    stored = repository.get("req-cas")
+    assert stored is not None
+    assert stored.version == 2
+    assert stored.created_at == first.created_at
+
+
+def test_confirmation_snapshot_blocks_stale_review_version() -> None:
+    repository = InMemoryRequirementDraftRepository()
+    draft = build_guided_draft(request_reference="req-confirm-cas", use_case="Two-person podcast", participants=2, budget_minor=90_000, currency="USD", laptop_connectors=("usb-c",), monitoring="independent")
+    repository.save(new_draft_record("user-1", 1, draft, ()), expected_version=None)
+    repository.save(new_draft_record("user-1", 2, draft, ()), expected_version=1)
+    with pytest.raises(StaleDraftError):
+        repository.confirm_current("req-confirm-cas", "user-1", 1, lambda _record: None)
 
 
 def test_configured_bearer_authentication_uses_only_the_token_hash() -> None:

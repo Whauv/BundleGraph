@@ -1,167 +1,44 @@
-import React from 'react';
+import React, { useRef } from 'react';
+import { ChevronDown, FlaskConical, LogOut, Moon, MoreHorizontal, RotateCcw, Sun, UserRound } from 'lucide-react';
 import { useDemo } from '../../store/demoStore';
-import { Layers, LogOut, RotateCcw, SlidersHorizontal, User } from 'lucide-react';
 import { clearSession } from '../../auth/session';
 
-export const Header: React.FC = () => {
-  const { presets, activePresetId, loadPreset, resetAll, isLoading, runtimeMode, runtimeLabel } = useDemo();
+export type Theme = 'light' | 'dark';
 
-  return (
-    <header className="main-header" style={{ padding: 0, gap: 0, borderBottom: 'none' }}>
-      {/* Top Brand Tier */}
-      <div
-        className="header-top"
-        style={{
-          height: '56px',
-          padding: '0 1.25rem',
-          borderBottom: '1px solid #222222',
-          backgroundColor: '#000000',
-        }}
-      >
-        <div className="brand-section">
-          <div className="brand-logo-badge" style={{ background: '#111111', borderColor: '#2a2a2a', color: '#ffffff' }} title="BundleGraph Engine">
-            <Layers size={15} />
+export const Header: React.FC<{ theme: Theme; onToggleTheme: () => void }> = ({ theme, onToggleTheme }) => {
+  const { presets, activePresetId, loadPreset, resetAll, isLoading, runtimeMode, currentStep, interpretation } = useDemo();
+  const demoMenu = useRef<HTMLDetailsElement>(null);
+  const choosePreset = async (preset: (typeof presets)[number]) => {
+    if ((currentStep !== 'builder' || interpretation) && !window.confirm('Replace the current browser workflow with this synthetic scenario?')) return;
+    await loadPreset(preset); if (demoMenu.current) demoMenu.current.open = false;
+  };
+  const reset = () => { if (window.confirm('Start a new setup? This clears the current browser workflow.')) void resetAll(); };
+  return <header className="app-header">
+    <div className="app-header__inner">
+      <a className="brand-lockup" href="#/builder" aria-label="BundleGraph home">
+        <span className="brand-mark" aria-hidden="true">BG</span>
+        <span><strong className="brand-name">BundleGraph</strong><span className="brand-message">Build a setup that works together.</span></span>
+      </a>
+      <div className="header-actions">
+        <span className={`environment-indicator ${runtimeMode === 'fixture' ? 'environment-indicator--fixture' : ''}`}><span aria-hidden="true" />{runtimeMode === 'fixture' ? 'Synthetic demo data' : 'Connected application'}</span>
+        <button type="button" className="icon-button" onClick={onToggleTheme} aria-label={`Use ${theme === 'dark' ? 'light' : 'dark'} theme`}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button>
+        <details className="header-menu" ref={demoMenu}>
+          <summary><FlaskConical size={16} /> Demo tools <ChevronDown size={14} /></summary>
+          <div className="header-menu__panel header-menu__panel--wide">
+            <p className="menu-label">Labeled scenarios</p><p className="menu-copy">These replace the current browser draft and never represent live inventory.</p>
+            <div className="scenario-actions">{presets.map((preset) => <button key={preset.id} type="button" className={`scenario-button ${activePresetId === preset.id ? 'is-active' : ''}`} onClick={() => void choosePreset(preset)} disabled={isLoading}>{preset.name}</button>)}</div>
+            <div className="menu-section"><p className="menu-label">Developer details</p><p className="menu-copy">Runtime: {runtimeMode}. Provider and schema diagnostics remain server-controlled.</p></div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontSize: '1.0625rem', fontWeight: 700, letterSpacing: '-0.02em', color: '#ffffff' }}>
-              BundleGraph
-            </span>
-            <span
-              style={{
-                padding: '0.1rem 0.4rem',
-                borderRadius: '2px',
-                backgroundColor: '#111111',
-                border: '1px solid #2a2a2a',
-                fontFamily: 'var(--font-mono)',
-                fontSize: '0.6875rem',
-                color: '#ffffff',
-                fontWeight: 600,
-              }}
-            >
-              v1.0-RC
-            </span>
-          </div>
-          <span className="brand-subtitle" style={{ color: '#888888', borderColor: '#222222', fontSize: '0.75rem', fontFamily: 'var(--font-mono)' }}>
-            Evidence-Backed Hardware Graph &amp; PayPal Settlement Engine
-          </span>
-        </div>
-
-        <div className="header-badges" style={{ gap: '0.75rem' }}>
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              padding: '0.25rem 0.6rem',
-              borderRadius: '2px',
-              backgroundColor: '#051108',
-              border: '1px solid rgba(0, 229, 117, 0.4)',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '0.6875rem',
-              color: '#00e575',
-              fontWeight: 600,
-            }}
-          >
-            <span
-              style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                backgroundColor: '#00e575',
-                display: 'inline-block',
-                boxShadow: '0 0 8px #00e575',
-              }}
-            />
-            <span>{runtimeLabel}</span>
-          </div>
-
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              padding: '0.25rem 0.6rem',
-              borderRadius: '2px',
-              backgroundColor: '#0a0a0a',
-              border: '1px solid #222222',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '0.6875rem',
-              color: '#888888',
-            }}
-          >
-            <span>{runtimeMode === 'fixture' ? <>Curated Fixtures: <strong style={{ color: '#ffffff' }}>24 SKUs</strong></> : 'Server catalog'}</span>
-          </div>
-
-          <button
-            type="button"
-            className="reset-btn"
-            onClick={resetAll}
-            disabled={isLoading}
-            title="Reset application state, clear cache and logs"
-          >
-            <RotateCcw size={12} />
-            <span>Reset Session</span>
-          </button>
-
-          {runtimeMode === 'authoritative' && (
-            <button type="button" className="reset-btn" onClick={clearSession} title="End the protected browser session">
-              <LogOut size={12} />
-              <span>Sign out</span>
-            </button>
-          )}
-
-          <div
-            style={{
-              width: '28px',
-              height: '28px',
-              borderRadius: '2px',
-              backgroundColor: '#ffffff',
-              color: '#000000',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <User size={15} />
-          </div>
-        </div>
+        </details>
+        <details className="header-menu">
+          <summary aria-label="Account menu"><UserRound size={17} /><ChevronDown size={14} /></summary>
+          <div className="header-menu__panel"><p className="menu-label">Browser session</p><p className="menu-copy">Authentication and ownership are enforced by the backend.</p>{runtimeMode === 'authoritative' && <button type="button" className="menu-action" onClick={clearSession}><LogOut size={15} /> Sign out</button>}</div>
+        </details>
+        <details className="header-menu">
+          <summary aria-label="More options"><MoreHorizontal size={18} /></summary>
+          <div className="header-menu__panel"><button type="button" className="menu-action" onClick={reset} disabled={isLoading}><RotateCcw size={15} /> Start a new setup</button></div>
+        </details>
       </div>
-
-      {/* Evaluation Scenarios Bar */}
-      <div className="preset-bar">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <div className="preset-title-group" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <SlidersHorizontal size={12} style={{ color: '#666666' }} />
-            <span>Scenarios:</span>
-          </div>
-          <div className="preset-buttons" role="group" aria-label="Evaluation test presets">
-            {presets.map((p) => {
-              const isActive = activePresetId === p.id;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  className={`preset-btn ${isActive ? 'active' : ''}`}
-                  onClick={() => loadPreset(p)}
-                  disabled={isLoading}
-                  aria-pressed={isActive}
-                >
-                  <span>{p.name}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.6875rem', color: '#666666' }}>
-          <span>
-            Runtime:{' '}
-            <strong style={{ color: runtimeMode === 'fixture' ? '#fabc45' : '#00e575' }}>
-              {runtimeMode === 'fixture' ? 'FIXTURE_ONLY' : 'AUTHORITATIVE_API'}
-            </strong>
-          </span>
-        </div>
-      </div>
-    </header>
-  );
+    </div>
+  </header>;
 };

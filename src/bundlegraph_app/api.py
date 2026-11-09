@@ -23,7 +23,7 @@ from bundlegraph.service import (
     handle_generate_bundle_plans,
     handle_get_bundle_plan_evidence,
 )
-from bundlegraph.replanning import ExecutionFact, LockedComponent, ReplanRequest, ReplacementBundleProposal, replan_bundle
+from bundlegraph.replanning import ExecutionFact, LockedComponent, ReplanRequest, replan_bundle
 from bundlegraph.selection import BundleProposal, BundleSelectionRequest, SolverLimits, select_bundles
 from bundlegraph.catalog import OFFLINE_FIXTURE_CATALOG
 from bundlegraph.interpretation import ExtractionValidationError, GroqProviderError, InterpretationRequest, StructuredExtractionProvider, clarification_questions, interpret_requirements
@@ -39,7 +39,7 @@ from .application import (
 from .ids import new_id, plan_version_fingerprint  # noqa: F401 -- re-exported for client scripts
 from .planning import AuthoritativePlanningInputs, PlanningInputsRepository
 from .auth import AuthenticationProvider, Identity, InMemoryResourceOwnershipRepository, RejectingAuthenticationProvider, ResourceOwnershipRepository, TestingAuthenticationProvider
-from .requirements import CatalogRepository, InMemoryCatalogRepository, InMemoryRequirementDraftRepository, RequirementDraftRepository, build_guided_draft, new_draft_record
+from .requirements import CatalogRepository, InMemoryCatalogRepository, InMemoryRequirementDraftRepository, RequirementDraftRepository, StaleDraftError, build_guided_draft, new_draft_record
 from .discovery import CandidateDiscovery, CatalogCandidateDiscovery
 from .observability import log_request, request_started
 from .paypal import PayPalWebhookVerifier, RejectingWebhookVerifier
@@ -84,6 +84,7 @@ class SubmitApprovalBody(BaseModel):
 class InterpretDraftBody(BaseModel):
     request_reference: str = Field(min_length=1)
     message: str = Field(min_length=1)
+    expected_version: int | None = Field(default=None, ge=1)
 
 
 class ConfirmDraftBody(BaseModel):
@@ -100,6 +101,7 @@ class GuidedDraftBody(BaseModel):
     laptop_connectors: tuple[str, ...] = ()
     monitoring: str | None = None
     deadline: datetime | None = None
+    expected_version: int | None = Field(default=None, ge=1)
 
 
 class CandidateDiscoveryBody(BaseModel):
@@ -196,6 +198,8 @@ class WebhookBody(BaseModel):
 class AuthoritativePlanningRequest(BaseModel):
     """A caller may identify a confirmed request, but cannot supply its contents."""
 
+    model_config = ConfigDict(extra="forbid")
+
     schema_version: str
     correlation_id: str = Field(min_length=1)
     confirmation_reference: str = Field(min_length=1)
@@ -203,10 +207,25 @@ class AuthoritativePlanningRequest(BaseModel):
 
 class CreatePlanBody(AuthoritativePlanningRequest):
     proposal_key: str | None = Field(default=None, min_length=1)
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=200)
 
 
 class ApplyReplanBody(AuthoritativePlanningRequest):
-    replacement: ReplacementBundleProposal
+    expected_plan_version: int = Field(ge=1)
+    replacement_proposal_key: str = Field(min_length=1)
+    failed_product_ids: frozenset[str] = frozenset()
+    failed_offer_ids: frozenset[str] = frozenset()
+    excluded_product_ids: frozenset[str] = frozenset()
+    excluded_offer_ids: frozenset[str] = frozenset()
+    execution_facts: tuple[ExecutionFact, ...] = ()
+    locked_components: tuple[LockedComponent, ...] = ()
+    limits: BoundedSolverLimits = BoundedSolverLimits()
+
+    @model_validator(mode="after")
+    def require_change_trigger(self) -> "ApplyReplanBody":
+        if not (self.failed_product_ids or self.failed_offer_ids or self.excluded_product_ids or self.excluded_offer_ids):
+            raise ValueError("at least one failed or excluded product/offer is required")
+        return self
 
 
 def build_app(
@@ -279,6 +298,12 @@ def build_app(
         if owner != identity.subject:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "resource not found")
 
+    def require_new_or_owned_operation(identity: Identity, operation_id: str) -> None:
+        """Reject an existing operation owned by another subject without disclosing it."""
+        owner = owners.owner("operation", operation_id)
+        if owner is not None and owner != identity.subject:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "resource not found")
+
     @app.get("/healthz")
     def healthz() -> HealthResponse:
         return HealthResponse(status="ok", schema_version="1.0")
@@ -294,7 +319,7 @@ def build_app(
         return {"runtime": runtime_name, "api_base": "", "capabilities": {"planning": bool(readiness_checks.get("persistence") and readiness_checks.get("authentication") and readiness_checks.get("catalog", True)), "candidate_discovery": True, "live_candidate_provider": bool(readiness_checks.get("candidate_provider")), "payments": bool(readiness_checks.get("paypal") and readiness_checks.get("webhook_verifier"))}}
 
     @app.post("/requirement-drafts")
-    def save_requirement_draft(draft: DraftRequirements, identity: Identity = Depends(require_identity)) -> dict[str, Any]:
+    def save_requirement_draft(draft: DraftRequirements, x_expected_version: int | None = Header(default=None, alias="X-Expected-Version"), identity: Identity = Depends(require_identity)) -> dict[str, Any]:
         existing = drafts.get(draft.request_reference)
         if existing is not None and existing.owner_subject != identity.subject:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "request not found")
@@ -307,9 +332,14 @@ def build_app(
         if not draft.required_quantities:
             missing.add("required quantities")
         validated = draft.model_copy(update={"missing_information": tuple(sorted(missing))})
-        version = existing.version + 1 if existing else 1
-        record = new_draft_record(identity.subject, version, validated, clarification_questions(validated.missing_information))
-        drafts.save(record)
+        if existing is not None and x_expected_version != existing.version:
+            raise HTTPException(status.HTTP_409_CONFLICT, {"reason_code": "STALE_DRAFT_VERSION", "current_version": existing.version})
+        version = (x_expected_version or 0) + 1
+        record = new_draft_record(identity.subject, version, validated, clarification_questions(validated.missing_information), created_at=existing.created_at if existing else None)
+        try:
+            drafts.save(record, expected_version=x_expected_version)
+        except StaleDraftError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, {"reason_code": "STALE_DRAFT_VERSION", "current_version": exc.actual}) from exc
         owners.claim("request", validated.request_reference, identity.subject)
         return {"draft": validated.model_dump(mode="json"), "version": version, "clarification_questions": list(record.clarification_questions), "can_confirm": not validated.missing_information}
 
@@ -330,14 +360,24 @@ def build_app(
         existing = drafts.get(body.request_reference)
         if existing is not None and existing.owner_subject != identity.subject:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "request not found")
-        version = existing.version + 1 if existing else 1
+        if existing is not None and body.expected_version != existing.version:
+            raise HTTPException(status.HTTP_409_CONFLICT, {"reason_code": "STALE_DRAFT_VERSION", "current_version": existing.version})
+        version = (body.expected_version or 0) + 1
         questions = clarification_questions(draft.missing_information)
-        drafts.save(new_draft_record(identity.subject, version, draft, questions))
+        try:
+            drafts.save(new_draft_record(identity.subject, version, draft, questions, created_at=existing.created_at if existing else None), expected_version=body.expected_version)
+        except StaleDraftError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, {"reason_code": "STALE_DRAFT_VERSION", "current_version": exc.actual}) from exc
         owners.claim("request", body.request_reference, identity.subject)
         return {"draft": draft.model_dump(mode="json"), "version": version, "clarification_questions": list(questions), "can_confirm": not draft.missing_information}
 
     @app.post("/requirement-drafts/interpret")
     def interpret_requirement_draft(body: InterpretDraftBody, identity: Identity = Depends(require_identity)) -> dict[str, Any]:
+        existing = drafts.get(body.request_reference)
+        if existing is not None and existing.owner_subject != identity.subject:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "request not found")
+        if existing is not None and body.expected_version != existing.version:
+            raise HTTPException(status.HTTP_409_CONFLICT, {"reason_code": "STALE_DRAFT_VERSION", "current_version": existing.version})
         if extraction_provider is None:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "structured extraction provider is not configured")
         try:
@@ -346,11 +386,11 @@ def build_app(
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, {"reason_code": str(exc)}) from exc
         except ExtractionValidationError as exc:
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, {"reason_code": str(exc)}) from exc
-        existing = drafts.get(body.request_reference)
-        if existing is not None and existing.owner_subject != identity.subject:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "request not found")
-        version = existing.version + 1 if existing else 1
-        drafts.save(new_draft_record(identity.subject, version, result.draft, result.clarification_questions))
+        version = (body.expected_version or 0) + 1
+        try:
+            drafts.save(new_draft_record(identity.subject, version, result.draft, result.clarification_questions, created_at=existing.created_at if existing else None), expected_version=body.expected_version)
+        except StaleDraftError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, {"reason_code": "STALE_DRAFT_VERSION", "current_version": exc.actual}) from exc
         owners.claim("request", body.request_reference, identity.subject)
         return {**result.model_dump(mode="json"), "version": version, "can_confirm": not result.missing_information}
 
@@ -365,22 +405,30 @@ def build_app(
     @app.post("/requirement-drafts/{request_reference}/confirm")
     def confirm_requirement_draft(request_reference: str, body: ConfirmDraftBody, identity: Identity = Depends(require_identity)) -> dict[str, Any]:
         require_owner(identity, "request", request_reference)
-        record = drafts.get(request_reference)
-        if record is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "request not found")
-        if record.version != body.expected_version:
-            raise HTTPException(status.HTTP_409_CONFLICT, "draft version changed; review the latest draft")
-        draft = record.draft
-        if draft.missing_information:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"reason_code": "CLARIFICATION_REQUIRED", "missing_information": list(draft.missing_information)})
-        if None in (draft.use_case, draft.participants, draft.budget, draft.listening_requirement) or not draft.required_quantities or not draft.laptop_connectors:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "draft is incomplete")
         catalog = catalogs.get_active()
         if catalog is None:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "no active authoritative catalog")
-        confirmation_reference = new_id("conf")
-        confirmed = ConfirmedRequirements(request_reference=draft.request_reference, confirmation_reference=confirmation_reference, use_case=draft.use_case, participants=draft.participants, budget=draft.budget, required_quantities=draft.required_quantities, laptop_connectors=draft.laptop_connectors, listening_requirement=draft.listening_requirement, hard_constraints=draft.hard_constraints, preferences=draft.preferences, deadline=draft.deadline, missing_information=())
-        planning_inputs.put(AuthoritativePlanningInputs(requirements=confirmed, catalog=catalog, owner_subject=identity.subject))
+        result: dict[str, ConfirmedRequirements] = {}
+
+        def persist_snapshot(record: Any) -> None:
+            draft = record.draft
+            if draft.missing_information:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"reason_code": "CLARIFICATION_REQUIRED", "missing_information": list(draft.missing_information)})
+            if None in (draft.use_case, draft.participants, draft.budget, draft.listening_requirement) or not draft.required_quantities or not draft.laptop_connectors:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "draft is incomplete")
+            confirmation_reference = new_id("conf")
+            confirmed = ConfirmedRequirements(request_reference=draft.request_reference, confirmation_reference=confirmation_reference, use_case=draft.use_case, participants=draft.participants, budget=draft.budget, required_quantities=draft.required_quantities, laptop_connectors=draft.laptop_connectors, listening_requirement=draft.listening_requirement, hard_constraints=draft.hard_constraints, preferences=draft.preferences, deadline=draft.deadline, missing_information=())
+            planning_inputs.put(AuthoritativePlanningInputs(requirements=confirmed, catalog=catalog, owner_subject=identity.subject))
+            result["confirmed"] = confirmed
+
+        try:
+            drafts.confirm_current(request_reference, identity.subject, body.expected_version, persist_snapshot)
+        except KeyError as exc:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "request not found") from exc
+        except StaleDraftError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, {"reason_code": "STALE_DRAFT_VERSION", "current_version": exc.actual}) from exc
+        confirmed = result["confirmed"]
+        confirmation_reference = confirmed.confirmation_reference
         owners.claim("confirmation", confirmation_reference, identity.subject)
         return {"confirmation_reference": confirmation_reference, "requirements": confirmed.model_dump(mode="json")}
 
@@ -413,33 +461,48 @@ def build_app(
                     proposal=chosen,
                     merchant_lookup=inputs.merchant_lookup(),
                     evidence=evidence,
+                    creation_idempotency_key=body.idempotency_key,
+                    owner_subject=identity.subject,
                 )
             )
         except ApplicationError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+            raise _application_http_error(exc) from exc
         owners.claim("plan", plan.plan_id, identity.subject)
         return PlanEnvelope(plan=plan)
 
     @app.post("/plans/{plan_id}/replans")
     def apply_replan(plan_id: str, body: ApplyReplanBody, identity: Identity = Depends(require_identity)) -> PlanEnvelope:
         require_owner(identity, "plan", plan_id)
-        _require_confirmation_owner(body.confirmation_reference, identity, planning_inputs)
-        inputs = _require_planning_inputs(body.confirmation_reference, planning_inputs)
-        replacement = body.replacement.replacement
+        inputs = _require_confirmation_owner(body.confirmation_reference, identity, planning_inputs)
+        try:
+            plan = service.get_plan(plan_id)
+        except ApplicationError as exc:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "plan not found") from exc
+        head = plan.head()
+        if head.version != body.expected_plan_version:
+            raise HTTPException(status.HTTP_409_CONFLICT, {"reason_code": "STALE_PLAN_VERSION", "current_version": head.version})
+        if head.confirmation_reference != body.confirmation_reference:
+            raise HTTPException(status.HTTP_409_CONFLICT, {"reason_code": "CONFIRMATION_MISMATCH"})
+        result = _generate_replan_result(plan, body, inputs)
+        selected = next((item for item in result.replacements if item.replacement.proposal_key == body.replacement_proposal_key), None)
+        if selected is None:
+            raise HTTPException(status.HTTP_409_CONFLICT, {"reason_code": "REPLAN_PROPOSAL_NOT_GENERATED"})
+        replacement = selected.replacement
         evidence = _proposal_evidence(replacement.evidence_references, inputs.catalog.evidence)
         try:
             plan = service.apply_replan(
                 ApplyReplanInput(
                     plan_id=plan_id,
-                    replacement=body.replacement,
+                    replacement=selected,
                     confirmation_reference=body.confirmation_reference,
                     correlation_id=body.correlation_id,
                     merchant_lookup=inputs.merchant_lookup(),
                     evidence=evidence,
+                    expected_plan_version=body.expected_plan_version,
                 )
             )
         except ApplicationError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+            raise _application_http_error(exc) from exc
         return PlanEnvelope(plan=plan)
 
     @app.post("/plans/{plan_id}/replan-proposals")
@@ -453,8 +516,7 @@ def build_app(
         if head.version != body.expected_plan_version:
             raise HTTPException(status.HTTP_409_CONFLICT, "plan version changed; reload before replanning")
         inputs = _require_confirmation_owner(head.confirmation_reference, identity, planning_inputs)
-        original = _stored_or_reconstructed_proposal(head.payload, head.line_items, inputs)
-        result = replan_bundle(ReplanRequest(original_plan_id=plan.plan_id, original_plan_version=str(head.version), confirmation_reference=head.confirmation_reference, original_proposal=original, selection_request=BundleSelectionRequest(requirements=inputs.requirements, catalog=inputs.catalog, limits=SolverLimits.model_validate(body.limits.model_dump())), failed_product_ids=body.failed_product_ids, failed_offer_ids=body.failed_offer_ids, excluded_product_ids=body.excluded_product_ids, excluded_offer_ids=body.excluded_offer_ids, execution_facts=body.execution_facts, locked_components=body.locked_components))
+        result = _generate_replan_result(plan, body, inputs)
         return result.model_dump(mode="json")
 
     @app.post("/approvals")
@@ -471,7 +533,7 @@ def build_app(
                 )
             )
         except ApplicationError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+            raise _application_http_error(exc) from exc
         owners.claim("approval", approval.approval_id, identity.subject)
         return ApprovalEnvelope(approval=approval)
 
@@ -479,6 +541,7 @@ def build_app(
     def authorize_payment(body: AuthorizePaymentBody, identity: Identity = Depends(require_identity)) -> PaymentOperationEnvelope:
         require_role(identity, "payments:execute")
         require_owner(identity, "approval", body.approval_id)
+        require_new_or_owned_operation(identity, body.operation_id)
         try:
             op = service.authorize_payment(
                 approval_id=body.approval_id,
@@ -486,7 +549,7 @@ def build_app(
                 merchant_allocation_id=body.merchant_allocation_id,
             )
         except ApplicationError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+            raise _application_http_error(exc) from exc
         owners.claim("operation", op.operation_id, identity.subject)
         return PaymentOperationEnvelope(operation=op)
 
@@ -494,13 +557,14 @@ def build_app(
     def capture_payment(body: CapturePaymentBody, identity: Identity = Depends(require_identity)) -> PaymentOperationEnvelope:
         require_role(identity, "payments:execute")
         require_owner(identity, "operation", body.parent_operation_id)
+        require_new_or_owned_operation(identity, body.operation_id)
         try:
             op = service.capture_payment(
                 parent_operation_id=body.parent_operation_id,
                 operation_id=body.operation_id,
             )
         except ApplicationError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+            raise _application_http_error(exc) from exc
         owners.claim("operation", op.operation_id, identity.subject)
         return PaymentOperationEnvelope(operation=op)
 
@@ -508,13 +572,14 @@ def build_app(
     def void_authorization(body: VoidAuthorizationBody, identity: Identity = Depends(require_identity)) -> PaymentOperationEnvelope:
         require_role(identity, "payments:execute")
         require_owner(identity, "operation", body.parent_operation_id)
+        require_new_or_owned_operation(identity, body.operation_id)
         try:
             op = service.void_authorization(
                 parent_operation_id=body.parent_operation_id,
                 operation_id=body.operation_id,
             )
         except ApplicationError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+            raise _application_http_error(exc) from exc
         owners.claim("operation", op.operation_id, identity.subject)
         return PaymentOperationEnvelope(operation=op)
 
@@ -522,6 +587,7 @@ def build_app(
     def refund_capture(body: RefundCaptureBody, identity: Identity = Depends(require_identity)) -> PaymentOperationEnvelope:
         require_role(identity, "payments:execute")
         require_owner(identity, "operation", body.parent_operation_id)
+        require_new_or_owned_operation(identity, body.operation_id)
         try:
             op = service.refund_capture(
                 parent_operation_id=body.parent_operation_id,
@@ -529,7 +595,7 @@ def build_app(
                 amount=body.amount,
             )
         except ApplicationError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+            raise _application_http_error(exc) from exc
         owners.claim("operation", op.operation_id, identity.subject)
         return PaymentOperationEnvelope(operation=op)
 
@@ -557,7 +623,10 @@ def build_app(
             operation_id=body.operation_id,
             raw_payload_fingerprint=body.raw_payload_fingerprint,
         )
-        advanced = service.record_webhook_event(event)
+        try:
+            advanced = service.record_webhook_event(event)
+        except ApplicationError as exc:
+            raise _application_http_error(exc) from exc
         return WebhookEnvelope(recorded=advanced)
 
     @app.post("/webhooks/paypal/direct")
@@ -589,7 +658,10 @@ def build_app(
             operation_id=extract_operation_id(event),
             raw_payload_fingerprint=body_fingerprint(raw_body),
         )
-        advanced = service.record_webhook_event(webhook_event)
+        try:
+            advanced = service.record_webhook_event(webhook_event)
+        except ApplicationError as exc:
+            raise _application_http_error(exc) from exc
         return {"recorded": advanced, "event_id": webhook_event.event_id}
 
     if browser_payment_orchestrator is not None:
@@ -600,6 +672,7 @@ def build_app(
         def create_browser_order(body: CreateBrowserOrderBody, identity: Identity = Depends(require_identity)) -> dict[str, Any]:
             require_role(identity, "payments:execute")
             require_owner(identity, "approval", body.approval_id)
+            require_new_or_owned_operation(identity, body.operation_id)
             try:
                 created = orchestrator.create_order(
                     approval_id=body.approval_id,
@@ -607,7 +680,8 @@ def build_app(
                     merchant_allocation_id=body.merchant_allocation_id,
                 )
             except BrowserPaymentError as exc:
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+                code = status.HTTP_409_CONFLICT if exc.reason_code == "IDEMPOTENCY_MISMATCH" else status.HTTP_422_UNPROCESSABLE_ENTITY
+                raise HTTPException(code, {"reason_code": exc.reason_code, "message": str(exc)}) from exc
             owners.claim("operation", created.operation_id, identity.subject)
             payload: dict[str, Any] = {
                 "operation_id": created.operation_id,
@@ -629,7 +703,7 @@ def build_app(
             try:
                 completed = orchestrator.complete_order(operation_id=body.operation_id)
             except BrowserPaymentError as exc:
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"reason_code": exc.reason_code, "message": str(exc)}) from exc
             owners.claim("operation", completed.capture_operation_id, identity.subject)
             return {
                 "authorize_operation_id": completed.authorize_operation_id,
@@ -649,7 +723,7 @@ def build_app(
             try:
                 operation = orchestrator.cancel_order(operation_id=body.operation_id)
             except BrowserPaymentError as exc:
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"reason_code": exc.reason_code, "message": str(exc)}) from exc
             return {
                 "operation_id": operation.operation_id,
                 "status": operation.status.value,
@@ -693,6 +767,45 @@ def _stored_or_reconstructed_proposal(payload: dict[str, Any], line_items: Any, 
         if actual == expected:
             return proposal
     raise HTTPException(status.HTTP_409_CONFLICT, "stored plan predates replan metadata and could not be reconstructed")
+
+
+def _generate_replan_result(plan: Plan, body: GenerateReplanBody | ApplyReplanBody, inputs: AuthoritativePlanningInputs) -> Any:
+    """Regenerate replacements only from the stored plan, confirmation, and catalog."""
+    head = plan.head()
+    original = _stored_or_reconstructed_proposal(head.payload, head.line_items, inputs)
+    return replan_bundle(
+        ReplanRequest(
+            original_plan_id=plan.plan_id,
+            original_plan_version=str(head.version),
+            confirmation_reference=head.confirmation_reference,
+            original_proposal=original,
+            selection_request=BundleSelectionRequest(
+                requirements=inputs.requirements,
+                catalog=inputs.catalog,
+                limits=SolverLimits.model_validate(body.limits.model_dump()),
+            ),
+            failed_product_ids=body.failed_product_ids,
+            failed_offer_ids=body.failed_offer_ids,
+            excluded_product_ids=body.excluded_product_ids,
+            excluded_offer_ids=body.excluded_offer_ids,
+            execution_facts=body.execution_facts,
+            locked_components=body.locked_components,
+        )
+    )
+
+
+def _application_http_error(exc: ApplicationError) -> HTTPException:
+    conflict_codes = {
+        "IDEMPOTENCY_MISMATCH",
+        "PAYMENT_CAPACITY_RESERVED",
+        "APPROVAL_AMOUNT_MISMATCH",
+        "APPROVAL_CURRENCY_MISMATCH",
+        "STALE_PLAN_FINGERPRINT",
+        "STALE_PLAN_VERSION",
+        "CONFIRMATION_MISMATCH",
+    }
+    http_status = status.HTTP_409_CONFLICT if exc.reason_code in conflict_codes else status.HTTP_422_UNPROCESSABLE_ENTITY
+    return HTTPException(http_status, {"reason_code": exc.reason_code, "message": str(exc)})
 
 
 def _generate_from_authoritative_inputs(

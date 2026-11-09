@@ -4,8 +4,9 @@ The adapter lives in `src/bundlegraph_app/paypal.py`. It is a thin wrapper over 
 `PayPalSandboxClient` protocol with two behaviors that the application depends on:
 
 1. The caller-supplied `operation_id` becomes the `PayPal-Request-Id` idempotency
-   key via `PayPalAdapter.idempotency_key(operation_id, kind)`. A replay returns
-   the same transport-level `PayPalResult`.
+   key via `PayPalAdapter.idempotency_key(operation_id, kind)`. An exact replay
+   returns the same transport-level `PayPalResult`; reusing the ID with different
+   immutable request fields is rejected before any provider call.
 2. The adapter rejects any recipient reference that is not in the explicit
    sandbox allowlist supplied at construction time. Hallucinated or injected
    merchant strings cannot reach the sandbox.
@@ -105,6 +106,11 @@ Operator checklist before enabling the live client:
   marks the operation `FAILED` with reason `BUYER_CANCELLED`. No PayPal call
   is made.
 
+The application first commits a capacity reservation, then performs the provider
+request, then stores the outcome. It does not hold a database lock during network
+I/O and does not claim exactly-once external delivery. `SUBMITTED` or `UNCERTAIN`
+records must be reconciled with the same provider idempotency key.
+
 ## Direct PayPal webhook endpoint
 
 `POST /webhooks/paypal/direct` is public (no bearer required). The handler
@@ -113,5 +119,6 @@ forwards them to `/v1/notifications/verify-webhook-signature` with the
 configured `PAYPAL_WEBHOOK_ID`, and only then records the event. Unverified
 deliveries return HTTP 401; malformed envelopes return 400. The event id is a
 primary key in `bundlegraph_webhook_events`, so replayed deliveries are
-de-duplicated at the storage layer and surface as `recorded: false`. The raw
+de-duplicated at the storage layer. Fully processed duplicates surface as
+`recorded: false`; received-but-unprocessed duplicates resume application. The raw
 body is fingerprinted (SHA-256) and persisted on the stored event for audit.

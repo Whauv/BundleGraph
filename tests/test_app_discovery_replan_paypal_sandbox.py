@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from bundlegraph.models import ProductCategory
-from bundlegraph_app.api import GenerateReplanBody
+from bundlegraph_app.api import ApplyReplanBody, GenerateReplanBody
 from bundlegraph_app.discovery import CatalogCandidateDiscovery
 from bundlegraph_app.manage import local_demo_catalog
 from bundlegraph_app.paypal_sandbox import PAYPAL_SANDBOX_BASE_URL, PayPalSandboxOrdersClient
@@ -66,3 +66,17 @@ def test_replan_generation_requires_a_trigger_and_bounded_search() -> None:
         GenerateReplanBody(expected_plan_version=1)
     with pytest.raises(ValidationError):
         GenerateReplanBody(expected_plan_version=1, failed_offer_ids={"offer-1"}, limits={"max_evaluations": 10_001, "max_proposals": 3})
+
+
+def test_replan_apply_accepts_only_server_selection_reference_and_authoritative_facts() -> None:
+    body = ApplyReplanBody(
+        schema_version="1.0",
+        correlation_id="corr-replan",
+        confirmation_reference="confirm-1",
+        expected_plan_version=1,
+        replacement_proposal_key="proposal-generated-by-server",
+        failed_offer_ids={"offer-failed"},
+    )
+    assert body.replacement_proposal_key == "proposal-generated-by-server"
+    with pytest.raises(ValidationError):
+        ApplyReplanBody.model_validate({**body.model_dump(mode="json"), "replacement": {"tampered": True}})

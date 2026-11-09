@@ -5,7 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from threading import RLock
-from typing import Protocol
+from typing import Callable, Protocol
 
 from bundlegraph.models import DraftRequirements, FixtureCatalog, LaptopConnectorFact, ListeningRequirement, Money, ProductCategory, QuantityRequirement
 
@@ -21,8 +21,9 @@ class RequirementDraftRecord:
 
 
 class RequirementDraftRepository(Protocol):
-    def save(self, record: RequirementDraftRecord) -> None: ...
+    def save(self, record: RequirementDraftRecord, *, expected_version: int | None = None) -> None: ...
     def get(self, request_reference: str) -> RequirementDraftRecord | None: ...
+    def confirm_current(self, request_reference: str, owner_subject: str, expected_version: int, action: Callable[[RequirementDraftRecord], None]) -> RequirementDraftRecord: ...
 
 
 class CatalogRepository(Protocol):
@@ -34,14 +35,32 @@ class InMemoryRequirementDraftRepository:
         self._lock = RLock()
         self._records: dict[str, RequirementDraftRecord] = {}
 
-    def save(self, record: RequirementDraftRecord) -> None:
+    def save(self, record: RequirementDraftRecord, *, expected_version: int | None = None) -> None:
         with self._lock:
+            existing = self._records.get(record.draft.request_reference)
+            actual = existing.version if existing else None
+            if actual != expected_version:
+                raise StaleDraftError(expected_version, actual)
+            if existing is not None and existing.owner_subject != record.owner_subject:
+                raise ValueError("request already has a different owner")
             self._records[record.draft.request_reference] = deepcopy(record)
 
     def get(self, request_reference: str) -> RequirementDraftRecord | None:
         with self._lock:
             record = self._records.get(request_reference)
             return deepcopy(record) if record else None
+
+    def confirm_current(self, request_reference: str, owner_subject: str, expected_version: int, action: Callable[[RequirementDraftRecord], None]) -> RequirementDraftRecord:
+        """Run confirmation persistence while edits to this in-memory draft are excluded."""
+        with self._lock:
+            record = self._records.get(request_reference)
+            if record is None or record.owner_subject != owner_subject:
+                raise KeyError(request_reference)
+            if record.version != expected_version:
+                raise StaleDraftError(expected_version, record.version)
+            snapshot = deepcopy(record)
+            action(snapshot)
+            return snapshot
 
     def next_version(self, request_reference: str) -> int:
         existing = self.get(request_reference)
@@ -56,9 +75,16 @@ class InMemoryCatalogRepository:
         return deepcopy(self._catalog)
 
 
-def new_draft_record(owner_subject: str, version: int, draft: DraftRequirements, clarification_questions: tuple[str, ...], now: datetime | None = None) -> RequirementDraftRecord:
+class StaleDraftError(ValueError):
+    def __init__(self, expected: int | None, actual: int | None) -> None:
+        super().__init__(f"draft version changed; expected {expected}, found {actual}")
+        self.expected = expected
+        self.actual = actual
+
+
+def new_draft_record(owner_subject: str, version: int, draft: DraftRequirements, clarification_questions: tuple[str, ...], now: datetime | None = None, created_at: datetime | None = None) -> RequirementDraftRecord:
     timestamp = now or datetime.now(UTC)
-    return RequirementDraftRecord(owner_subject=owner_subject, version=version, draft=draft, clarification_questions=clarification_questions, created_at=timestamp, updated_at=timestamp)
+    return RequirementDraftRecord(owner_subject=owner_subject, version=version, draft=draft, clarification_questions=clarification_questions, created_at=created_at or timestamp, updated_at=timestamp)
 
 
 def build_guided_draft(*, request_reference: str, use_case: str | None, participants: int | None, budget_minor: int | None, currency: str | None, laptop_connectors: tuple[str, ...], monitoring: str | None, deadline: datetime | None = None) -> DraftRequirements:

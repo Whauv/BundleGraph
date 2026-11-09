@@ -1,78 +1,30 @@
 import React from 'react';
+import { Check, Circle, CircleAlert } from 'lucide-react';
+import { motion } from 'motion/react';
 import { useDemo } from '../../store/demoStore';
 import type { ScreenStep } from '../../types/bundlegraph';
-import { Terminal, CheckSquare, GitCompare, Lock, Activity } from 'lucide-react';
 
-interface StepItem {
-  id: ScreenStep;
-  label: string;
-  number: number;
-  icon: React.ComponentType<{ size?: number; style?: React.CSSProperties; className?: string }>;
-}
-
-const STEPS: StepItem[] = [
-  { id: 'builder', label: 'Request Builder', number: 1, icon: Terminal },
-  { id: 'review', label: 'Requirements Review', number: 2, icon: CheckSquare },
-  { id: 'comparison', label: 'Comparison & Graph', number: 3, icon: GitCompare },
-  { id: 'approval', label: 'Plan Authorization', number: 4, icon: Lock },
-  { id: 'execution', label: 'Execution & Recovery', number: 5, icon: Activity },
+const STEPS: Array<{ id: ScreenStep; label: string; unavailable: string }> = [
+  { id: 'builder', label: 'Describe', unavailable: '' },
+  { id: 'review', label: 'Confirm requirements', unavailable: 'Describe the setup first.' },
+  { id: 'comparison', label: 'Compare bundles', unavailable: 'Confirm requirements and generate bundles first.' },
+  { id: 'approval', label: 'Review & approve', unavailable: 'Select and save a bundle first.' },
+  { id: 'execution', label: 'Track & recover', unavailable: 'No execution or recovery record is available.' },
 ];
 
 export const StepNav: React.FC = () => {
-  const { currentStep, setStep, interpretation, proposals, approvalRecord, executionRecord } = useDemo();
-  const enabled: Record<ScreenStep, boolean> = {
-    builder: true,
-    review: Boolean(interpretation),
-    comparison: proposals.length > 0,
-    approval: Boolean(approvalRecord),
-    execution: Boolean(executionRecord),
-  };
-
-  return (
-    <div style={{ height: '44px', width: '100%', backgroundColor: '#000000', borderBottom: '1px solid #222222', padding: '0 1.25rem' }}>
-      <nav className="step-nav" style={{ height: '100%', padding: 0, borderBottom: 'none', gap: '0.25rem' }} aria-label="Demo workflow navigation">
-        {STEPS.map((step) => {
-          const isActive = currentStep === step.id;
-          const IconComponent = step.icon;
-
-          return (
-            <button
-              key={step.id}
-              type="button"
-              className={`step-tab ${isActive ? 'active' : ''}`}
-              onClick={() => setStep(step.id)}
-              disabled={!enabled[step.id]}
-              aria-current={isActive ? 'step' : undefined}
-              style={{
-                height: '100%',
-                padding: '0 1rem',
-                borderBottom: isActive ? '2px solid #ffffff' : '2px solid transparent',
-              }}
-            >
-              <span
-                style={{
-                  width: '18px',
-                  height: '18px',
-                  borderRadius: '2px',
-                  backgroundColor: isActive ? '#000000' : '#141414',
-                  color: isActive ? '#ffffff' : '#888888',
-                  border: `1px solid ${isActive ? '#000000' : '#222222'}`,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '0.625rem',
-                  fontWeight: 700,
-                }}
-              >
-                {step.number}
-              </span>
-              <IconComponent size={13} style={{ opacity: isActive ? 1 : 0.6 }} />
-              <span style={{ fontWeight: isActive ? 600 : 500 }}>{step.label}</span>
-            </button>
-          );
-        })}
-      </nav>
-    </div>
-  );
+  const { currentStep, setStep, canNavigate } = useDemo();
+  const currentIndex = STEPS.findIndex((step) => step.id === currentStep);
+  return <nav className="workflow-nav" aria-label="Bundle planning workflow"><ol>{STEPS.map((step, index) => {
+    const active = currentStep === step.id;
+    const available = canNavigate(step.id);
+    const complete = index < currentIndex && available;
+    return <li key={step.id}>
+      <button type="button" className={`workflow-step ${active ? 'is-active' : ''} ${complete ? 'is-complete' : ''}`} onClick={() => setStep(step.id)} disabled={!available} aria-current={active ? 'step' : undefined} title={!available ? step.unavailable : undefined}>
+        {active && <motion.span className="workflow-step__indicator" layoutId="workflow-step" aria-hidden="true" />}
+        <span className="workflow-step__number" aria-hidden="true">{complete ? <Check size={14} /> : available ? <Circle size={13} /> : <CircleAlert size={13} />}</span>
+        <span><small>Step {index + 1}</small>{step.label}</span>
+      </button>
+    </li>;
+  })}</ol></nav>;
 };

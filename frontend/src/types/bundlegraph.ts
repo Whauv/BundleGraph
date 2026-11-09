@@ -28,12 +28,13 @@ export interface ExtractedFact {
 
 export interface DraftRequirements {
   request_reference: string;
-  use_case: string;
-  participants: number;
-  budget: Money;
+  use_case: string | null;
+  participants: number | null;
+  budget: Money | null;
   required_quantities: Array<{ category: string; quantity: number }>;
   laptop_connectors: Array<{ connector: string }>;
-  listening_requirement: string;
+  listening_requirement: string | null;
+  deadline?: string | null;
   missing_information: string[];
 }
 
@@ -224,7 +225,38 @@ export type PipelineStage =
   | 'evaluating_compatibility'
   | 'selecting_bundles'
   | 'persisting_plan'
-  | 'complete';
+  | 'complete'
+  | 'failed';
+
+export type WorkflowOperation =
+  | 'interpret'
+  | 'confirm'
+  | 'generate'
+  | 'persist'
+  | 'evidence'
+  | 'approve'
+  | 'execute'
+  | 'replan'
+  | 'reset';
+
+export type SearchResultStatus =
+  | 'idle'
+  | 'loading'
+  | 'candidates'
+  | 'infeasible'
+  | 'blocked'
+  | 'failed'
+  | 'stale';
+
+export interface SearchResultState {
+  status: SearchResultStatus;
+  backend_status?: string;
+  reason_codes: string[];
+  infeasibility?: BundleSelectionResult['infeasibility'];
+  result_revision: number;
+}
+
+export type EvidenceLoadStatus = 'idle' | 'loading' | 'loaded' | 'failed';
 
 export interface ApiFailure {
   status: number;
