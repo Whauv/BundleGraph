@@ -1,0 +1,293 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "BundleGraph repository architecture",
+    "output": "docs/architecture/bundlegraph-repository.html",
+    "quality_profile": "showcase",
+    "locale": "en",
+    "repository": {
+      "url": "https://github.com/Whauv/BundleGraph.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "823cc66656b5485268e5fe84ca77d92f241d7dd5"
+    },
+    "views": [
+      {
+        "id": "request_journey",
+        "label": "Request to plan",
+        "focus": ["user", "frontend", "api", "interpretation", "planner", "application", "postgres"],
+        "note": "Drafts become authoritative only after confirmation; deterministic rules create proposals."
+      },
+      {
+        "id": "recovery_journey",
+        "label": "Recovery and replan",
+        "focus": ["frontend", "api", "replanner", "application", "postgres"],
+        "note": "Replanning returns typed deltas and creates a successor plan version through Member 2."
+      },
+      {
+        "id": "optional_providers",
+        "label": "Optional providers",
+        "focus": ["groq", "channel3", "evidence", "research_providers", "elastic", "paypal"],
+        "note": "Provider adapters are opt-in; missing configuration fails closed or leaves facts unknown."
+      }
+    ],
+    "legend": {
+      "mode": "all",
+      "entries": {
+        "frontend": { "label": "Browser experience" },
+        "backend": { "label": "Application or intelligence service" },
+        "database": { "label": "Durable or evidence storage" },
+        "security": { "label": "Trust and authorization boundary" },
+        "external": { "label": "User or opt-in provider" },
+        "cloud": { "label": "Provider integration capability" }
+      }
+    }
+  },
+  "components": [
+    {
+      "id": "user",
+      "type": "external",
+      "label": "Podcast creator",
+      "sublabel": "describes · reviews · confirms",
+      "pos": [20, 300],
+      "size": [130, 66],
+      "sources": [
+        { "path": "frontend/src/App.tsx", "line": 27, "end_line": 32, "label": "five-step browser journey" }
+      ]
+    },
+    {
+      "id": "frontend",
+      "type": "frontend",
+      "label": "React frontend",
+      "sublabel": "fixture or authoritative mode",
+      "pos": [180, 300],
+      "size": [145, 66],
+      "tag": "Vite · TypeScript",
+      "sources": [
+        { "path": "frontend/src/App.tsx", "line": 7, "end_line": 64, "label": "screen composition" },
+        { "path": "frontend/src/api/client.ts", "line": 13, "end_line": 18, "label": "runtime modes" },
+        { "path": "frontend/src/api/client.ts", "line": 41, "end_line": 67, "label": "authenticated API client" }
+      ]
+    },
+    {
+      "id": "auth",
+      "type": "security",
+      "label": "Authentication",
+      "sublabel": "OIDC introspection or token hashes",
+      "pos": [370, 45],
+      "size": [150, 70],
+      "sources": [
+        { "path": "src/bundlegraph_app/auth.py", "line": 36, "end_line": 51, "label": "configured bearer tokens" },
+        { "path": "src/bundlegraph_app/auth.py", "line": 54, "end_line": 125, "label": "OIDC introspection" }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "FastAPI boundary",
+      "sublabel": "auth · ownership · typed routes",
+      "pos": [370, 300],
+      "size": [150, 70],
+      "tag": "Member 2",
+      "sources": [
+        { "path": "src/bundlegraph_app/api.py", "line": 189, "end_line": 209, "label": "application composition" },
+        { "path": "src/bundlegraph_app/api.py", "line": 269, "end_line": 371, "label": "requirements and planning routes" },
+        { "path": "src/bundlegraph_app/api.py", "line": 373, "end_line": 449, "label": "plan and approval routes" }
+      ]
+    },
+    {
+      "id": "interpretation",
+      "type": "backend",
+      "label": "Requirements interpreter",
+      "sublabel": "schema-validated draft only",
+      "pos": [565, 150],
+      "size": [155, 70],
+      "tag": "Member 1",
+      "sources": [
+        { "path": "src/bundlegraph/interpretation.py", "line": 61, "end_line": 77, "label": "draft-only provider contract" },
+        { "path": "src/bundlegraph/interpretation.py", "line": 121, "end_line": 174, "label": "untrusted model extraction" }
+      ]
+    },
+    {
+      "id": "planner",
+      "type": "security",
+      "label": "Deterministic planner",
+      "sublabel": "compatibility graph · exact search",
+      "pos": [565, 300],
+      "size": [155, 70],
+      "tag": "Member 1",
+      "sources": [
+        { "path": "src/bundlegraph/compatibility_graph.py", "line": 313, "end_line": 339, "label": "eight deterministic rules" },
+        { "path": "src/bundlegraph/selection.py", "line": 270, "end_line": 291, "label": "bounded deterministic search" }
+      ]
+    },
+    {
+      "id": "replanner",
+      "type": "backend",
+      "label": "Dependency re-planner",
+      "sublabel": "typed deltas · original preserved",
+      "pos": [565, 450],
+      "size": [155, 70],
+      "tag": "Member 1",
+      "sources": [
+        { "path": "src/bundlegraph/replanning.py", "line": 185, "end_line": 201, "label": "replacement proposal generation" }
+      ]
+    },
+    {
+      "id": "application",
+      "type": "backend",
+      "label": "Application service",
+      "sublabel": "plans · approvals · operations",
+      "pos": [805, 300],
+      "size": [155, 70],
+      "tag": "Member 2",
+      "sources": [
+        { "path": "src/bundlegraph_app/application.py", "line": 85, "end_line": 103, "label": "authoritative service ports" },
+        { "path": "src/bundlegraph_app/application.py", "line": 109, "end_line": 146, "label": "versioned plan persistence" },
+        { "path": "src/bundlegraph_app/application.py", "line": 164, "end_line": 198, "label": "exact-version approval" }
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL",
+      "sublabel": "authoritative state and evidence",
+      "pos": [1000, 450],
+      "size": [155, 70],
+      "sources": [
+        { "path": "src/bundlegraph_app/postgres.py", "line": 38, "end_line": 113, "label": "plans, approvals, operations, evidence" },
+        { "path": "src/bundlegraph_app/postgres.py", "line": 116, "end_line": 165, "label": "drafts, catalog, ownership" }
+      ]
+    },
+    {
+      "id": "groq",
+      "type": "external",
+      "label": "Groq",
+      "sublabel": "optional structured extraction",
+      "pos": [565, 35],
+      "size": [155, 70],
+      "sources": [
+        { "path": "src/bundlegraph/interpretation.py", "line": 92, "end_line": 119, "label": "bounded Groq adapter" },
+        { "path": "src/bundlegraph/interpretation.py", "line": 121, "end_line": 174, "label": "validated JSON response" }
+      ]
+    },
+    {
+      "id": "paypal",
+      "type": "external",
+      "label": "PayPal Sandbox",
+      "sublabel": "opt-in smoke path only",
+      "pos": [965, 75],
+      "size": [155, 70],
+      "tag": "production blocked",
+      "sources": [
+        { "path": "src/bundlegraph_app/paypal_sandbox.py", "line": 48, "end_line": 88, "label": "OAuth and Orders client" },
+        { "path": "src/bundlegraph_app/paypal_sandbox.py", "line": 90, "end_line": 119, "label": "payments and webhook verification" },
+        { "path": "src/bundlegraph_app/main.py", "line": 84, "end_line": 97, "label": "disabled app path and production block" }
+      ]
+    },
+    {
+      "id": "channel3",
+      "type": "external",
+      "label": "Channel3",
+      "sublabel": "optional candidate discovery",
+      "pos": [370, 600],
+      "size": [150, 66],
+      "sources": [
+        { "path": "src/bundlegraph/channel3.py", "line": 193, "end_line": 264, "label": "normalized bounded discovery" },
+        { "path": "src/bundlegraph_app/main.py", "line": 86, "end_line": 91, "label": "configured discovery adapter" }
+      ]
+    },
+    {
+      "id": "evidence",
+      "type": "cloud",
+      "label": "Evidence capability",
+      "sublabel": "lookup · conflict · freshness",
+      "pos": [565, 600],
+      "size": [155, 66],
+      "tag": "optional package path",
+      "sources": [
+        { "path": "src/bundlegraph/evidence_repository.py", "line": 73, "end_line": 177, "label": "repository and Elastic adapter" },
+        { "path": "src/bundlegraph/evidence_research.py", "line": 148, "end_line": 180, "label": "bounded research workflow" }
+      ]
+    },
+    {
+      "id": "research_providers",
+      "type": "external",
+      "label": "KERNEL / Astropods",
+      "sublabel": "unconfigured research ports",
+      "pos": [765, 600],
+      "size": [155, 66],
+      "sources": [
+        { "path": "src/bundlegraph/evidence_research.py", "line": 136, "end_line": 145, "label": "providers fail closed" },
+        { "path": "src/bundlegraph/evidence_research.py", "line": 148, "end_line": 180, "label": "bounded execution path" }
+      ]
+    },
+    {
+      "id": "elastic",
+      "type": "external",
+      "label": "Elastic",
+      "sublabel": "optional evidence backend",
+      "pos": [965, 600],
+      "size": [155, 66],
+      "sources": [
+        { "path": "src/bundlegraph/evidence_repository.py", "line": 149, "end_line": 177, "label": "index setup and availability" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Same-origin FastAPI application runtime",
+      "wraps": ["api", "interpretation", "planner", "replanner", "application"],
+      "pad": 18
+    }
+  ],
+  "connections": [
+    { "id": "user_frontend", "from": "user", "to": "frontend", "label": "describe and review", "variant": "emphasis" },
+    { "id": "frontend_api", "from": "frontend", "to": "api", "label": "Bearer + JSON API", "variant": "security" },
+    { "id": "auth_api", "from": "auth", "to": "api", "label": "validate identity and roles", "variant": "security" },
+    { "id": "api_interpretation", "from": "api", "to": "interpretation", "label": "interpret draft", "variant": "dashed" },
+    { "id": "groq_interpretation", "from": "groq", "to": "interpretation", "label": "untrusted JSON proposal", "variant": "dashed" },
+    { "id": "api_planner", "from": "api", "to": "planner", "label": "confirmed inputs", "variant": "emphasis" },
+    { "id": "planner_application", "from": "planner", "to": "application", "label": "proposal", "variant": "emphasis" },
+    { "id": "api_replanner", "from": "api", "to": "replanner", "label": "failure + locked items", "variant": "dashed" },
+    { "id": "replanner_application", "from": "replanner", "to": "application", "label": "typed replacement deltas", "variant": "dashed" },
+    { "id": "api_postgres", "from": "api", "to": "postgres", "label": "drafts · catalog · ownership", "variant": "security" },
+    { "id": "application_postgres", "from": "application", "to": "postgres", "label": "plans · evidence · approvals · operations", "variant": "security" },
+    { "id": "application_paypal", "from": "application", "to": "paypal", "label": "adapter disabled in application mode", "variant": "dashed" },
+    { "id": "channel3_api", "from": "channel3", "to": "api", "label": "optional discovery endpoint", "variant": "dashed" },
+    { "id": "research_evidence", "from": "research_providers", "to": "evidence", "label": "bounded page + extraction", "variant": "dashed" },
+    { "id": "elastic_evidence", "from": "elastic", "to": "evidence", "label": "optional repository implementation", "variant": "dashed" },
+    { "id": "evidence_planner", "from": "evidence", "to": "planner", "label": "evidence records; never truth scores", "variant": "dashed" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Authoritative journey",
+      "items": [
+        "AI extraction produces a draft; it cannot confirm requirements or approve a plan.",
+        "Compatibility and selection are deterministic, evidence-backed, and block on required unknowns.",
+        "Member 2 persists the chosen proposal, evidence, exact-version approval, and recovery versions."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Current runtime status",
+      "items": [
+        "Application mode uses PostgreSQL and authentication but keeps PayPal disabled.",
+        "Production mode intentionally refuses startup until PayPal Orders and webhook verification are composed.",
+        "The PayPal sandbox Orders client is currently exercised through an explicit smoke workflow."
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Optional provider boundaries",
+      "items": [
+        "Groq output is schema-validated before a draft is stored.",
+        "Channel3 discovery enriches candidates without replacing deterministic selection.",
+        "Elastic, KERNEL, and Astropods remain optional capabilities and fail closed when unconfigured."
+      ]
+    }
+  ]
+}
