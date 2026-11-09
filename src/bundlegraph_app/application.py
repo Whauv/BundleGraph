@@ -436,11 +436,18 @@ class ApplicationService:
             event = stored
         if event.operation_id is None:
             event.processing_error_code = "OPERATION_REFERENCE_MISSING"
+            # A verified event without an authoritative operation binding cannot
+            # safely be applied later. Record it as terminally ignored so retries
+            # are harmless rather than repeatedly reporting progress.
+            event.processed_at = self._now()
             self._webhook_events.save(event)
             return True
         operation = self._payments.get(event.operation_id)
         if operation is None:
             event.processing_error_code = "OPERATION_NOT_FOUND"
+            # Do not let a signed reference to an unknown operation become a
+            # perpetual retry or an opportunity to fabricate payment state.
+            event.processed_at = self._now()
             self._webhook_events.save(event)
             return True
         if event.resource_reference not in {operation.provider_reference, operation.operation_id}:

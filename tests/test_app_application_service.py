@@ -438,6 +438,23 @@ def test_duplicate_and_unverified_webhook_events_do_not_change_state():
     assert service.record_webhook_event(bad) is False
 
 
+def test_unknown_webhook_operation_is_terminally_ignored_and_deduped():
+    service, *_ = _wire_service()
+    event = WebhookEvent(
+        event_id="evt-unknown-operation",
+        event_type="PAYMENT.CAPTURE.COMPLETED",
+        received_at=FIXED_NOW,
+        verified=True,
+        resource_reference="CAP-not-stored",
+        operation_id="operation-not-stored",
+        raw_payload_fingerprint="c" * 32,
+    )
+    assert service.record_webhook_event(event) is True
+    assert service._webhook_events.get(event.event_id).processing_error_code == "OPERATION_NOT_FOUND"
+    assert service._webhook_events.get(event.event_id).processed_at is not None
+    assert service.record_webhook_event(event) is False
+
+
 def test_received_webhook_retries_after_interrupted_operation_write_and_refreshes_plan():
     class UncertainCaptureClient(FakeSandboxClient):
         def capture(self, *, request_id, authorization_reference, amount, operation_id):
