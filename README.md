@@ -2,6 +2,12 @@
 
 BundleGraph is an evidence-aware bundle planner for podcast equipment. Member 1 provides normalized catalog/evidence contracts, deterministic compatibility, bounded selection, and replanning. The `bundlegraph_app` boundary adds authoritative requirement confirmation, PostgreSQL persistence, ownership authorization, plans, approvals, and payment ports. The browser application can be served by the same FastAPI process.
 
+Hackathon judges and contributors can use the ready-to-paste [submission package](SUBMISSION.md) and the [three-minute demo plan](docs/demo-video.md).
+
+Public demo: [bundlegraph.onrender.com](https://bundlegraph.onrender.com). The
+hosted site is explicitly labeled synthetic fixture mode; use the Docker Compose
+judge runbook below for the PostgreSQL-backed authoritative workflow.
+
 The bundled catalog is synthetic fixture data for offline development; it is not a live retailer feed and must never be presented as one.
 
 ## Contract principles
