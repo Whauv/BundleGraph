@@ -13,6 +13,11 @@ npm --prefix frontend run dev
 Open `http://127.0.0.1:5173`. Fixture approvals, execution records, and recovery
 records are visibly simulated and make no provider or payment calls.
 
+This is the recommended judge-facing hackathon profile. It deliberately bypasses
+the sign-in gate, because external OIDC is not a hackathon requirement. The UI
+must continue to label fixtures and simulated actions; PayPal Sandbox validation
+is demonstrated through the repository's separate opt-in backend workflow.
+
 ## Authoritative application mode
 
 Copy `frontend/.env.example` to `frontend/.env.local` and set:
@@ -23,10 +28,11 @@ VITE_BUNDLEGRAPH_API_BASE=http://127.0.0.1:8080
 ```
 
 The sign-in gate accepts the local application token when OIDC is not configured.
-For a deployed identity provider, configure its public authorization and token
-endpoints, public SPA client ID, scopes, and registered redirect URI. The browser
-uses Authorization Code with PKCE and keeps the access token in `sessionStorage`.
-The backend validates it through RFC 7662 introspection. Client secrets remain
+This bearer-token path is for a controlled authoritative dry run, not a public
+production authentication claim. After the hackathon, a deployed identity
+provider can supply public authorization and token endpoints, a public SPA client
+ID, scopes, and a registered redirect URI. The browser uses Authorization Code
+with PKCE and keeps the access token in `sessionStorage`; client secrets remain
 server-side and must never use a `VITE_` variable.
 
 The authoritative journey is draft → clarification/review → confirmation →

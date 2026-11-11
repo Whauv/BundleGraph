@@ -122,6 +122,26 @@ configured API failures are shown and never replaced by fixture success.
 
 ## Durable same-origin application
 
+### Hackathon authentication profile
+
+Auth0 or another OIDC provider is **not required for the hackathon build**. The
+public judge-facing demonstration should use `BUNDLEGRAPH_MODE=demo`; it uses
+clearly labeled synthetic fixtures and does not show a sign-in gate. For a
+controlled PostgreSQL-backed dry run, use `BUNDLEGRAPH_MODE=application` with
+`BUNDLEGRAPH_AUTH_IDENTITIES` and the local token described below.
+
+The Dockerfile therefore builds the fixture frontend by default. The Compose
+sandbox explicitly overrides the build argument with
+`VITE_BUNDLEGRAPH_RUNTIME=authoritative`. Any future application/production
+image must make the same explicit build-time choice; setting only the backend
+mode cannot change values already compiled into the browser bundle.
+
+Do not describe either option as production-grade user authentication. OIDC is
+retained as a post-hackathon hardening path, and the fail-closed `production`
+composition still requires an authentication provider. PayPal Sandbox lifecycle
+validation can be run separately with the documented opt-in smoke command, so
+skipping Auth0 does not remove or simulate the PayPal integration.
+
 `BUNDLEGRAPH_MODE=application` enables the deployable planning and approval path. It uses PostgreSQL for requirement drafts, catalog snapshots, confirmed planning inputs, ownership, plans, approvals, evidence, and operation records. FastAPI serves `frontend/` at `/`, so the browser discovers the API at the same origin and CORS is unnecessary.
 
 ```powershell
@@ -158,7 +178,12 @@ regenerates the candidate from authoritative state, creates a new plan version,
 and requires new approval. `POST /plans` also accepts an optional owner-scoped
 `idempotency_key` for lost-response retries.
 
-`BUNDLEGRAPH_MODE=demo` remains the default, offline fixture-only UI. `BUNDLEGRAPH_MODE=production` still fails closed until the documented real PayPal Orders and webhook-verification adapters are available. `/healthz` is liveness; `/readyz` reports persistence, authentication, active catalog, PayPal, and webhook readiness. See [Member 2 deployment](docs/member2/deployment.md).
+`BUNDLEGRAPH_MODE=demo` remains the default, offline fixture-only UI and is the
+recommended hackathon presentation profile. `BUNDLEGRAPH_MODE=production` is a
+separate post-hackathon target and fails closed without its documented durable
+dependencies and authentication provider. `/healthz` is liveness; `/readyz`
+reports persistence, authentication, active catalog, PayPal, and webhook
+readiness. See [Member 2 deployment](docs/member2/deployment.md).
 
 ## PayPal sandbox validation
 

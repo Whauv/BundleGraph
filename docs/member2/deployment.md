@@ -17,6 +17,25 @@ because the real secrets still need to be rotated through Render's secret UI.
   webhook endpoint are only mounted in this mode. Startup fails fast if any
   secret is missing.
 
+## Hackathon profile (OIDC deferred)
+
+OIDC/Auth0 is not required for the hackathon submission. Use `demo` for the
+public judge-facing synthetic-fixture experience; it requires no access token
+and makes no claim of production authentication. Use `application` plus
+`BUNDLEGRAPH_AUTH_IDENTITIES` only for a controlled PostgreSQL-backed dry run.
+
+The repository Dockerfile defaults `VITE_BUNDLEGRAPH_RUNTIME` to `fixture` for
+this public demo. `compose.sandbox.yml` explicitly builds `authoritative`. A
+future durable deployment must also select `authoritative` during the frontend
+build; changing `BUNDLEGRAPH_MODE` at container startup does not rewrite the
+compiled Vite configuration.
+
+Do not weaken the `production` composition to accommodate the demo. It remains
+fail-closed and requires configured authentication. OIDC setup, browser session
+management, and multi-user production authorization are explicitly deferred
+post-hackathon. PayPal Sandbox lifecycle checks remain available through the
+separate opt-in smoke workflow and are not replaced by fixture UI state.
+
 ## Local
 
 ```powershell
@@ -39,8 +58,8 @@ Environment variables:
 | --- | --- | --- |
 | `BUNDLEGRAPH_MODE` | yes (application/prod) | `application` selects durable planning with payments disabled; `production` is fail-closed. |
 | `DATABASE_URL` | yes (application/prod) | PostgreSQL connection URL; keep it in the deployment secret manager. |
-| `BUNDLEGRAPH_AUTH_IDENTITIES` | yes (application) | JSON map of SHA-256 opaque-token hashes to `{subject, roles}`. |
-| `BUNDLEGRAPH_OIDC_INTROSPECTION_URL` | alternative auth | RFC 7662 endpoint used to validate short-lived access tokens. |
+| `BUNDLEGRAPH_AUTH_IDENTITIES` | controlled application dry run | JSON map of SHA-256 opaque-token hashes to `{subject, roles}`; not required in demo mode. |
+| `BUNDLEGRAPH_OIDC_INTROSPECTION_URL` | post-hackathon production auth | RFC 7662 endpoint used to validate short-lived access tokens. |
 | `BUNDLEGRAPH_OIDC_CLIENT_ID` | with OIDC | Confidential server-side introspection client ID. |
 | `BUNDLEGRAPH_OIDC_CLIENT_SECRET` | with OIDC | Confidential server-side introspection client secret. |
 | `BUNDLEGRAPH_OIDC_AUDIENCE` | optional | Expected access-token audience; mismatches fail closed. |
@@ -58,6 +77,8 @@ Environment variables:
 ## Hosted (Render)
 
 - Service type: `web`.
+- Hackathon environment: set `BUNDLEGRAPH_MODE=demo` and rebuild the Docker
+  image. The Dockerfile's fixture default bypasses the local-token sign-in gate.
 - Build: `pip install -e ".[app]"`.
 - Start: `uvicorn bundlegraph_app.main:app --host 0.0.0.0 --port $PORT`.
 - Pre-deploy: `python -m bundlegraph_app.manage migrate`, followed by activation
