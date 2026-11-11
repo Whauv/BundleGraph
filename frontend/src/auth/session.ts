@@ -3,13 +3,32 @@ const EXPIRES_AT_KEY = 'bundlegraph.expires_at';
 const PKCE_VERIFIER_KEY = 'bundlegraph.pkce_verifier';
 const OIDC_STATE_KEY = 'bundlegraph.oidc_state';
 
-const authorizationEndpoint = import.meta.env.VITE_BUNDLEGRAPH_OIDC_AUTHORIZATION_ENDPOINT?.trim();
-const tokenEndpoint = import.meta.env.VITE_BUNDLEGRAPH_OIDC_TOKEN_ENDPOINT?.trim();
-const clientId = import.meta.env.VITE_BUNDLEGRAPH_OIDC_CLIENT_ID?.trim();
-const scope = import.meta.env.VITE_BUNDLEGRAPH_OIDC_SCOPE?.trim() || 'openid profile';
-const redirectUri = import.meta.env.VITE_BUNDLEGRAPH_OIDC_REDIRECT_URI?.trim() || `${window.location.origin}/`;
+export interface BrowserOidcConfig {
+  provider?: string;
+  authorization_endpoint: string;
+  token_endpoint: string;
+  client_id: string;
+  audience?: string;
+  scope?: string;
+  redirect_uri?: string;
+}
 
-export const oidcConfigured = Boolean(authorizationEndpoint && tokenEndpoint && clientId);
+let oidcConfig: BrowserOidcConfig | null = (() => {
+  const authorizationEndpoint = import.meta.env.VITE_BUNDLEGRAPH_OIDC_AUTHORIZATION_ENDPOINT?.trim();
+  const tokenEndpoint = import.meta.env.VITE_BUNDLEGRAPH_OIDC_TOKEN_ENDPOINT?.trim();
+  const clientId = import.meta.env.VITE_BUNDLEGRAPH_OIDC_CLIENT_ID?.trim();
+  return authorizationEndpoint && tokenEndpoint && clientId ? {
+    authorization_endpoint: authorizationEndpoint,
+    token_endpoint: tokenEndpoint,
+    client_id: clientId,
+    audience: import.meta.env.VITE_BUNDLEGRAPH_OIDC_AUDIENCE?.trim(),
+    scope: import.meta.env.VITE_BUNDLEGRAPH_OIDC_SCOPE?.trim() || 'openid profile email',
+    redirect_uri: import.meta.env.VITE_BUNDLEGRAPH_OIDC_REDIRECT_URI?.trim(),
+  } : null;
+})();
+
+export function configureOidc(config: BrowserOidcConfig | null): void { oidcConfig = config; }
+export function isOidcConfigured(): boolean { return Boolean(oidcConfig); }
 
 function base64Url(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
@@ -52,17 +71,21 @@ export function sessionExpiresAt(): number | null {
 }
 
 export async function beginSignIn(): Promise<void> {
-  if (!oidcConfigured || !authorizationEndpoint || !clientId) throw new Error('OIDC is not configured');
+  const config = oidcConfig;
+  if (!config) throw new Error('OIDC is not configured');
   const verifier = randomValue(48);
   const state = randomValue();
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
   sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
   sessionStorage.setItem(OIDC_STATE_KEY, state);
-  const url = new URL(authorizationEndpoint);
-  url.search = new URLSearchParams({
-    response_type: 'code', client_id: clientId, redirect_uri: redirectUri, scope, state,
+  const redirectUri = config.redirect_uri || `${window.location.origin}/`;
+  const parameters: Record<string, string> = {
+    response_type: 'code', client_id: config.client_id, redirect_uri: redirectUri, scope: config.scope || 'openid profile email', state,
     code_challenge: base64Url(new Uint8Array(digest)), code_challenge_method: 'S256',
-  }).toString();
+  };
+  if (config.audience) parameters.audience = config.audience;
+  const url = new URL(config.authorization_endpoint);
+  url.search = new URLSearchParams(parameters).toString();
   window.location.assign(url);
 }
 
@@ -73,13 +96,17 @@ export async function completeSignIn(): Promise<boolean> {
   const state = params.get('state');
   const expectedState = sessionStorage.getItem(OIDC_STATE_KEY);
   const verifier = sessionStorage.getItem(PKCE_VERIFIER_KEY);
-  if (!tokenEndpoint || !clientId || !state || state !== expectedState || !verifier) {
+  const config = oidcConfig;
+  if (!config || !state || state !== expectedState || !verifier) {
     clearSession();
     throw new Error('OIDC callback validation failed');
   }
-  const response = await fetch(tokenEndpoint, {
+  const redirectUri = config.redirect_uri || `${window.location.origin}/`;
+  const tokenParameters: Record<string, string> = { grant_type: 'authorization_code', code, client_id: config.client_id, redirect_uri: redirectUri, code_verifier: verifier };
+  if (config.audience) tokenParameters.audience = config.audience;
+  const response = await fetch(config.token_endpoint, {
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'authorization_code', code, client_id: clientId, redirect_uri: redirectUri, code_verifier: verifier }),
+    body: new URLSearchParams(tokenParameters),
   });
   if (!response.ok) throw new Error(`OIDC token exchange failed (${response.status})`);
   const payload = await response.json() as { access_token?: string; expires_in?: number };

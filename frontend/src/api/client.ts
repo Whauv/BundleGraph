@@ -3,6 +3,7 @@ import type {
   EvidenceRecord, ExecutionRecord, PresetScenario, ReplanResult, RequirementInterpretation,
 } from '../types/bundlegraph';
 import { clearSession, getAccessToken } from '../auth/session';
+import type { BrowserOidcConfig } from '../auth/session';
 import { createFixtureAdapter, FixtureContractError } from './fixtureAdapter';
 
 const configuredRuntime = import.meta.env.VITE_BUNDLEGRAPH_RUNTIME?.trim();
@@ -14,11 +15,33 @@ const DEFAULT_TIMEOUT_MS = Number.isFinite(configuredTimeout) && configuredTimeo
 const fixture = createFixtureAdapter();
 
 export type FrontendRuntimeMode = 'fixture' | 'authoritative';
-export const frontendRuntime = {
+export const frontendRuntime: { mode: FrontendRuntimeMode; label: string; apiBase: string | null } = {
   mode: (configuredRuntime === 'authoritative' ? 'authoritative' : 'fixture') as FrontendRuntimeMode,
   label: configuredRuntime === 'authoritative' ? 'Authoritative application API' : 'Synthetic offline fixtures',
   apiBase: configuredRuntime === 'authoritative' ? API_BASE : null,
 };
+
+interface RuntimeConfiguration {
+  runtime: string;
+  api_base: string;
+  authentication: BrowserOidcConfig | null;
+}
+
+export async function loadRuntimeConfiguration(): Promise<BrowserOidcConfig | null> {
+  if (configuredRuntime !== 'authoritative') return null;
+  const response = await fetch(`${API_BASE}/runtime-config`, { headers: { Accept: 'application/json' } });
+  if (!response.ok) throw new Error(`Runtime configuration failed (${response.status})`);
+  const value = await response.json() as unknown;
+  if (!isRecord(value) || !isString(value.runtime) || !('authentication' in value)) throw new Error('Runtime configuration response was invalid');
+  const runtime = value as unknown as RuntimeConfiguration;
+  frontendRuntime.mode = runtime.runtime === 'demo' ? 'fixture' : 'authoritative';
+  frontendRuntime.label = frontendRuntime.mode === 'fixture' ? 'Synthetic offline fixtures' : 'Authoritative application API';
+  frontendRuntime.apiBase = frontendRuntime.mode === 'authoritative' ? API_BASE : null;
+  if (runtime.authentication === null) return null;
+  const auth = runtime.authentication as unknown;
+  if (!isRecord(auth) || !isString(auth.authorization_endpoint) || !isString(auth.token_endpoint) || !isString(auth.client_id)) throw new Error('Runtime authentication configuration was invalid');
+  return runtime.authentication;
+}
 
 export class ApiError extends Error implements ApiFailure {
   status: number;

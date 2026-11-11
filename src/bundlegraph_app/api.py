@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -246,6 +247,7 @@ def build_app(
     browser_payment_orchestrator: BrowserPaymentOrchestrator | None = None,
     direct_webhook_verifier: DirectWebhookVerifier | None = None,
     browser_return_base_url: str | None = None,
+    browser_auth_config: dict[str, str] | None = None,
 ) -> FastAPI:
     """Return a FastAPI application wired to the given authoritative service.
 
@@ -265,7 +267,11 @@ def build_app(
         response.headers["X-Correlation-ID"] = correlation_id
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+        connect_sources = ["'self'"]
+        if browser_auth_config:
+            token_url = urlsplit(browser_auth_config["token_endpoint"])
+            connect_sources.append(f"{token_url.scheme}://{token_url.netloc}")
+        response.headers["Content-Security-Policy"] = f"default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; connect-src {' '.join(connect_sources)}; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
         log_request(method=request.method, path=request.url.path, status_code=response.status_code, correlation_id=correlation_id, started_at=started_at, runtime=runtime_name)
         return response
     if allowed_origins:
@@ -316,7 +322,7 @@ def build_app(
 
     @app.get("/runtime-config")
     def runtime_config() -> dict[str, Any]:
-        return {"runtime": runtime_name, "api_base": "", "capabilities": {"planning": bool(readiness_checks.get("persistence") and readiness_checks.get("authentication") and readiness_checks.get("catalog", True)), "candidate_discovery": True, "live_candidate_provider": bool(readiness_checks.get("candidate_provider")), "payments": bool(readiness_checks.get("paypal") and readiness_checks.get("webhook_verifier"))}}
+        return {"runtime": runtime_name, "api_base": "", "authentication": browser_auth_config, "capabilities": {"planning": bool(readiness_checks.get("persistence") and readiness_checks.get("authentication") and readiness_checks.get("catalog", True)), "candidate_discovery": True, "live_candidate_provider": bool(readiness_checks.get("candidate_provider")), "payments": bool(readiness_checks.get("paypal") and readiness_checks.get("webhook_verifier"))}}
 
     @app.post("/requirement-drafts")
     def save_requirement_draft(draft: DraftRequirements, x_expected_version: int | None = Header(default=None, alias="X-Expected-Version"), identity: Identity = Depends(require_identity)) -> dict[str, Any]:

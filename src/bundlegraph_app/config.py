@@ -32,6 +32,8 @@ class ApplicationSettings:
     oidc_client_id: str | None = None
     oidc_client_secret: str | None = None
     oidc_audience: str | None = None
+    oidc_issuer: str | None = None
+    oidc_browser_client_id: str | None = None
 
 
 def runtime_mode(environ: dict[str, str] | None = None) -> RuntimeMode:
@@ -49,10 +51,14 @@ def application_settings(environ: dict[str, str] | None = None) -> ApplicationSe
     bearer_configured = bool(values.get("BUNDLEGRAPH_AUTH_IDENTITIES", "").strip())
     oidc_names = ("BUNDLEGRAPH_OIDC_INTROSPECTION_URL", "BUNDLEGRAPH_OIDC_CLIENT_ID", "BUNDLEGRAPH_OIDC_CLIENT_SECRET")
     oidc_present = tuple(name for name in oidc_names if values.get(name, "").strip())
-    if not bearer_configured and not oidc_present:
-        raise RuntimeError("application startup blocked: configure BUNDLEGRAPH_AUTH_IDENTITIES or OIDC introspection")
     if oidc_present and len(oidc_present) != len(oidc_names):
         raise RuntimeError("application startup blocked: OIDC introspection URL, client ID, and client secret are all required")
+    jwt_names = ("BUNDLEGRAPH_OIDC_ISSUER", "BUNDLEGRAPH_OIDC_AUDIENCE", "BUNDLEGRAPH_OIDC_BROWSER_CLIENT_ID")
+    jwt_present = tuple(name for name in jwt_names if values.get(name, "").strip())
+    if jwt_present and len(jwt_present) != len(jwt_names):
+        raise RuntimeError("application startup blocked: OIDC issuer, audience, and browser client ID are all required")
+    if not bearer_configured and not oidc_present and not jwt_present:
+        raise RuntimeError("application startup blocked: configure BUNDLEGRAPH_AUTH_IDENTITIES, OIDC JWT, or OIDC introspection")
     try:
         identities = json.loads(values["BUNDLEGRAPH_AUTH_IDENTITIES"]) if bearer_configured else {}
     except json.JSONDecodeError as exc:
@@ -72,6 +78,8 @@ def application_settings(environ: dict[str, str] | None = None) -> ApplicationSe
         oidc_client_id=values.get("BUNDLEGRAPH_OIDC_CLIENT_ID") or None,
         oidc_client_secret=values.get("BUNDLEGRAPH_OIDC_CLIENT_SECRET") or None,
         oidc_audience=values.get("BUNDLEGRAPH_OIDC_AUDIENCE") or None,
+        oidc_issuer=values.get("BUNDLEGRAPH_OIDC_ISSUER") or None,
+        oidc_browser_client_id=values.get("BUNDLEGRAPH_OIDC_BROWSER_CLIENT_ID") or None,
     )
 
 

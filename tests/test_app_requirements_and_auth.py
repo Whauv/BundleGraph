@@ -6,7 +6,7 @@ import pytest
 from bundlegraph.models import ListeningRequirement, ProductCategory
 from bundlegraph.models import ConfirmedRequirements
 from bundlegraph.selection import BundleSelectionRequest, select_bundles
-from bundlegraph_app.auth import ConfiguredBearerAuthenticationProvider, Identity, InMemoryResourceOwnershipRepository, OidcIntrospectionAuthenticationProvider
+from bundlegraph_app.auth import ConfiguredBearerAuthenticationProvider, Identity, InMemoryResourceOwnershipRepository, OidcIntrospectionAuthenticationProvider, OidcJwtAuthenticationProvider
 from bundlegraph_app.config import application_settings
 from bundlegraph_app.requirements import InMemoryRequirementDraftRepository, StaleDraftError, build_guided_draft, new_draft_record
 from bundlegraph_app.manage import local_demo_catalog
@@ -93,6 +93,40 @@ def test_oidc_introspection_fails_closed_for_inactive_or_wrong_audience() -> Non
     assert wrong_audience.authenticate("Bearer token") is None
 
 
+def test_oidc_jwt_requires_issuer_audience_expiry_and_collects_permissions() -> None:
+    provider = OidcJwtAuthenticationProvider(
+        "https://bundlegraph-demo.us.auth0.com",
+        "https://bundlegraph-api",
+        decoder=lambda _token: {
+            "iss": "https://bundlegraph-demo.us.auth0.com/",
+            "aud": ["https://bundlegraph-api"],
+            "sub": "auth0|demo-user",
+            "exp": 4_102_444_800,
+            "scope": "openid profile",
+            "permissions": ["payments:execute"],
+        },
+    )
+
+    assert provider.authenticate("Bearer signed.jwt.token") == Identity(
+        subject="auth0|demo-user",
+        roles=frozenset({"openid", "profile", "payments:execute"}),
+    )
+
+
+def test_oidc_jwt_fails_closed_for_wrong_claims_or_decoder_failure() -> None:
+    wrong_audience = OidcJwtAuthenticationProvider(
+        "https://bundlegraph-demo.us.auth0.com/", "https://bundlegraph-api",
+        decoder=lambda _token: {"iss": "https://bundlegraph-demo.us.auth0.com/", "aud": "other", "sub": "user", "exp": 4_102_444_800},
+    )
+    invalid_signature = OidcJwtAuthenticationProvider(
+        "https://bundlegraph-demo.us.auth0.com/", "https://bundlegraph-api",
+        decoder=lambda _token: (_ for _ in ()).throw(ValueError("invalid signature")),
+    )
+
+    assert wrong_audience.authenticate("Bearer signed.jwt.token") is None
+    assert invalid_signature.authenticate("Bearer signed.jwt.token") is None
+
+
 def test_ownership_cannot_be_reassigned() -> None:
     owners = InMemoryResourceOwnershipRepository()
     owners.claim("plan", "plan-1", "user-1")
@@ -112,8 +146,14 @@ def test_application_configuration_is_fail_closed() -> None:
     oidc = application_settings({"DATABASE_URL": "postgresql://example", "BUNDLEGRAPH_OIDC_INTROSPECTION_URL": "https://identity.example/introspect", "BUNDLEGRAPH_OIDC_CLIENT_ID": "client", "BUNDLEGRAPH_OIDC_CLIENT_SECRET": "secret"})
     assert oidc.oidc_client_id == "client"
 
+    jwt = application_settings({"DATABASE_URL": "postgresql://example", "BUNDLEGRAPH_OIDC_ISSUER": "https://tenant.auth0.com/", "BUNDLEGRAPH_OIDC_AUDIENCE": "https://bundlegraph-api", "BUNDLEGRAPH_OIDC_BROWSER_CLIENT_ID": "public-client"})
+    assert jwt.oidc_issuer == "https://tenant.auth0.com/"
+
     with pytest.raises(RuntimeError, match="all required"):
         application_settings({"DATABASE_URL": "postgresql://example", "BUNDLEGRAPH_OIDC_CLIENT_ID": "client"})
+
+    with pytest.raises(RuntimeError, match="issuer, audience, and browser client ID"):
+        application_settings({"DATABASE_URL": "postgresql://example", "BUNDLEGRAPH_OIDC_ISSUER": "https://tenant.auth0.com/"})
 
 
 def test_local_demo_catalog_completes_the_real_selection_path() -> None:

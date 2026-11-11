@@ -1,5 +1,5 @@
 import React, { useEffect, useState, type ReactNode } from 'react';
-import { beginSignIn, completeSignIn, getAccessToken, oidcConfigured, setSession } from '../../auth/session';
+import { beginSignIn, completeSignIn, getAccessToken, isOidcConfigured, setSession } from '../../auth/session';
 import { frontendRuntime } from '../../api/client';
 
 export const AuthGate: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -21,10 +21,13 @@ export const AuthGate: React.FC<{ children: ReactNode }> = ({ children }) => {
         <h1 id="sign-in-title">Sign in to BundleGraph</h1>
         <p>Your session protects confirmed requirements, stored plans, evidence, approvals, and recovery proposals.</p>
         {error && <div className="callout callout-error" role="alert">{error}</div>}
-        {oidcConfigured ? (
+        {isOidcConfigured() ? (
+          <div>
           <button type="button" className="btn-primary" onClick={() => beginSignIn().catch((reason: unknown) => setError(String(reason)))}>
-            Continue with identity provider
+            Continue with Auth0
           </button>
+          <p className="form-help">No access token needs to be copied or shown. Sign in with the configured demo account.</p>
+          </div>
         ) : (
           <form onSubmit={(event) => { event.preventDefault(); if (localToken.trim()) setSession(localToken.trim(), 3600); }}>
             <label className="form-label" htmlFor="local-access-token">Local application access token</label>

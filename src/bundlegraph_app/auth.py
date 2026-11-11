@@ -125,6 +125,76 @@ class OidcIntrospectionAuthenticationProvider:
         return Identity(subject=subject, roles=roles)
 
 
+class OidcJwtAuthenticationProvider:
+    """Validate Auth0/OIDC JWT access tokens against the issuer's JWKS.
+
+    The default decoder permits only RS256 and validates issuer, audience,
+    signature, and required claims. A decoder can be injected for deterministic
+    offline tests; the boundary still rechecks the security-critical claims.
+    """
+
+    def __init__(
+        self,
+        issuer: str,
+        audience: str,
+        *,
+        decoder: Callable[[str], dict[str, Any]] | None = None,
+    ) -> None:
+        parsed = urlsplit(issuer)
+        if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
+            raise ValueError("OIDC issuer must be an HTTPS origin or issuer path")
+        self._issuer = issuer.rstrip("/") + "/"
+        self._audience = audience
+        if not audience:
+            raise ValueError("OIDC audience is required")
+        self._decoder = decoder or self._build_decoder()
+
+    def _build_decoder(self) -> Callable[[str], dict[str, Any]]:
+        import jwt
+
+        jwks = jwt.PyJWKClient(f"{self._issuer}.well-known/jwks.json")
+
+        def decode(token: str) -> dict[str, Any]:
+            signing_key = jwks.get_signing_key_from_jwt(token)
+            return jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=["RS256"],
+                audience=self._audience,
+                issuer=self._issuer,
+                options={"require": ["exp", "sub", "iss", "aud"]},
+            )
+
+        return decode
+
+    def authenticate(self, authorization: str | None) -> Identity | None:
+        if not authorization or not authorization.startswith("Bearer "):
+            return None
+        token = authorization[7:].strip()
+        if not token:
+            return None
+        try:
+            payload = self._decoder(token)
+        except Exception:
+            return None
+        if payload.get("iss") != self._issuer:
+            return None
+        audience = payload.get("aud")
+        audiences = {audience} if isinstance(audience, str) else set(audience or ())
+        if self._audience not in audiences:
+            return None
+        expires_at = payload.get("exp")
+        subject = payload.get("sub")
+        if not isinstance(expires_at, (int, float)) or expires_at <= time.time() or not isinstance(subject, str) or not subject:
+            return None
+        permissions = payload.get("permissions", [])
+        roles = set(permissions) if isinstance(permissions, list) and all(isinstance(item, str) for item in permissions) else set()
+        scope = payload.get("scope", "")
+        if isinstance(scope, str):
+            roles.update(scope.split())
+        return Identity(subject=subject, roles=frozenset(roles))
+
+
 class ResourceOwnershipRepository(Protocol):
     def claim(self, resource_type: str, resource_id: str, owner_subject: str) -> None: ...
     def owner(self, resource_type: str, resource_id: str) -> str | None: ...

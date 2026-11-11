@@ -13,10 +13,8 @@ npm --prefix frontend run dev
 Open `http://127.0.0.1:5173`. Fixture approvals, execution records, and recovery
 records are visibly simulated and make no provider or payment calls.
 
-This is the recommended judge-facing hackathon profile. It deliberately bypasses
-the sign-in gate, because external OIDC is not a hackathon requirement. The UI
-must continue to label fixtures and simulated actions; PayPal Sandbox validation
-is demonstrated through the repository's separate opt-in backend workflow.
+This remains the offline fallback. The hosted authoritative profile uses Auth0
+Universal Login and never displays or asks judges to copy an access token.
 
 ## Authoritative application mode
 
@@ -27,13 +25,12 @@ VITE_BUNDLEGRAPH_RUNTIME=authoritative
 VITE_BUNDLEGRAPH_API_BASE=http://127.0.0.1:8080
 ```
 
-The sign-in gate accepts the local application token when OIDC is not configured.
-This bearer-token path is for a controlled authoritative dry run, not a public
-production authentication claim. After the hackathon, a deployed identity
-provider can supply public authorization and token endpoints, a public SPA client
-ID, scopes, and a registered redirect URI. The browser uses Authorization Code
-with PKCE and keeps the access token in `sessionStorage`; client secrets remain
-server-side and must never use a `VITE_` variable.
+The browser first loads same-origin `/runtime-config`. When Auth0 is configured,
+the sign-in gate displays **Continue with Auth0**, uses Authorization Code with
+PKCE, requests the configured API audience, and retains the short-lived access
+token only in `sessionStorage`. It never renders the token. Client secrets remain
+server-side and must never use a `VITE_` variable. The local token form is only a
+fallback for a controlled bearer-auth application run.
 
 The authoritative journey is draft → clarification/review → confirmation →
 proposal generation → persisted plan/evidence → exact-version approval → replan.

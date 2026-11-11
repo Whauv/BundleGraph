@@ -122,25 +122,23 @@ configured API failures are shown and never replaced by fixture success.
 
 ## Durable same-origin application
 
-### Hackathon authentication profile
+### Hosted hackathon authentication
 
-Auth0 or another OIDC provider is **not required for the hackathon build**. The
-public judge-facing demonstration should use `BUNDLEGRAPH_MODE=demo`; it uses
-clearly labeled synthetic fixtures and does not show a sign-in gate. For a
-controlled PostgreSQL-backed dry run, use `BUNDLEGRAPH_MODE=application` with
-`BUNDLEGRAPH_AUTH_IDENTITIES` and the local token described below.
+The hosted authoritative/production profile uses Auth0 Universal Login with
+Authorization Code + PKCE. The browser discovers public Auth0 endpoints, client
+ID, audience, and scopes from same-origin `/runtime-config`; no client secret or
+access token is rendered. The API validates RS256 access tokens against the
+configured issuer JWKS, issuer, audience, expiry, and subject. A demo operator
+clicks **Continue with Auth0** and signs in with the prepared Auth0 demo account;
+there is no token-copy step.
 
-The Dockerfile therefore builds the fixture frontend by default. The Compose
-sandbox explicitly overrides the build argument with
-`VITE_BUNDLEGRAPH_RUNTIME=authoritative`. Any future application/production
-image must make the same explicit build-time choice; setting only the backend
-mode cannot change values already compiled into the browser bundle.
+Set `BUNDLEGRAPH_OIDC_ISSUER`, `BUNDLEGRAPH_OIDC_BROWSER_CLIENT_ID`, and
+`BUNDLEGRAPH_OIDC_AUDIENCE` together. The legacy hashed bearer-token map remains
+available for controlled local testing only. The Docker image initially builds
+the authoritative adapter, then `/runtime-config` safely selects labeled fixture
+behavior when the server itself is in `demo` mode.
 
-Do not describe either option as production-grade user authentication. OIDC is
-retained as a post-hackathon hardening path, and the fail-closed `production`
-composition still requires an authentication provider. PayPal Sandbox lifecycle
-validation can be run separately with the documented opt-in smoke command, so
-skipping Auth0 does not remove or simulate the PayPal integration.
+See the exact [Auth0 hosted-demo setup](docs/auth0-setup.md).
 
 `BUNDLEGRAPH_MODE=application` enables the deployable planning and approval path. It uses PostgreSQL for requirement drafts, catalog snapshots, confirmed planning inputs, ownership, plans, approvals, evidence, and operation records. FastAPI serves `frontend/` at `/`, so the browser discovers the API at the same origin and CORS is unnecessary.
 
@@ -178,9 +176,8 @@ regenerates the candidate from authoritative state, creates a new plan version,
 and requires new approval. `POST /plans` also accepts an optional owner-scoped
 `idempotency_key` for lost-response retries.
 
-`BUNDLEGRAPH_MODE=demo` remains the default, offline fixture-only UI and is the
-recommended hackathon presentation profile. `BUNDLEGRAPH_MODE=production` is a
-separate post-hackathon target and fails closed without its documented durable
+`BUNDLEGRAPH_MODE=demo` remains the default offline fallback.
+`BUNDLEGRAPH_MODE=production` fails closed without its documented durable
 dependencies and authentication provider. `/healthz` is liveness; `/readyz`
 reports persistence, authentication, active catalog, PayPal, and webhook
 readiness. See [Member 2 deployment](docs/member2/deployment.md).

@@ -66,7 +66,7 @@ def _planning_inputs(catalog):
     return planning
 
 
-def _client():
+def _client(*, browser_auth_config=None):
     plans, approvals, payments, webhooks, evidence_reader = new_in_memory_repositories()
     catalog = _available_catalog()
     sandbox = frozenset(offer.merchant_reference for offer in catalog.offers)
@@ -81,7 +81,7 @@ def _client():
         now=lambda: datetime(2026, 10, 25, 12, tzinfo=UTC),
     )
     planning = _planning_inputs(catalog)
-    return TestClient(build_app(service, evidence_reader, planning, authentication_provider=TestingAuthenticationProvider())), catalog
+    return TestClient(build_app(service, evidence_reader, planning, authentication_provider=TestingAuthenticationProvider(), browser_auth_config=browser_auth_config)), catalog
 
 
 def test_generation_resolves_confirmation_inputs_without_a_client_catalog():
@@ -114,6 +114,25 @@ def test_healthz_reports_schema_version():
     response = client.get("/healthz")
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "schema_version": "1.0"}
+
+
+def test_runtime_config_exposes_only_public_oidc_values_and_allows_token_origin() -> None:
+    public_auth = {
+        "provider": "auth0",
+        "authorization_endpoint": "https://tenant.auth0.com/authorize",
+        "token_endpoint": "https://tenant.auth0.com/oauth/token",
+        "client_id": "public-spa-client",
+        "audience": "https://bundlegraph-api",
+        "scope": "openid profile email",
+    }
+    client, _ = _client(browser_auth_config=public_auth)
+
+    response = client.get("/runtime-config")
+
+    assert response.status_code == 200
+    assert response.json()["authentication"] == public_auth
+    assert "secret" not in response.text.lower()
+    assert "connect-src 'self' https://tenant.auth0.com" in response.headers["content-security-policy"]
 
 
 def test_generate_bundle_plans_rejects_invalid_schema_version():

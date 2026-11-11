@@ -46,10 +46,11 @@ from browser storage.
 Prompts, tokens, extracted values, payment data, and evidence excerpts are excluded
 from optional client error telemetry.
 
-OIDC uses public browser configuration for Authorization Code with PKCE. The
-server uses `BUNDLEGRAPH_OIDC_INTROSPECTION_URL`, client ID, client secret, and
-optional expected audience. Local application mode may retain the existing
-hashed opaque-token map.
+OIDC uses public browser configuration returned by `/runtime-config` for
+Authorization Code with PKCE. Auth0 deployments configure issuer, public SPA
+client ID, API audience, and scopes; the server validates RS256 access tokens
+against issuer JWKS. Confidential RFC 7662 introspection and the hashed opaque
+token map remain alternative adapters for controlled environments.
 
 Release commands:
 

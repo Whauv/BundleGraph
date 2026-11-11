@@ -4,9 +4,10 @@ WORKDIR /frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend ./
-# Safe public-demo default. Authoritative deployments must opt in explicitly at
-# build time so a demo backend is never paired with a misleading sign-in gate.
-ARG VITE_BUNDLEGRAPH_RUNTIME=fixture
+# The single image discovers demo/application/production behavior from the
+# same-origin /runtime-config endpoint before rendering. Demo responses safely
+# downgrade the browser to the labeled fixture adapter.
+ARG VITE_BUNDLEGRAPH_RUNTIME=authoritative
 ENV VITE_BUNDLEGRAPH_RUNTIME=$VITE_BUNDLEGRAPH_RUNTIME
 RUN npm run build
 

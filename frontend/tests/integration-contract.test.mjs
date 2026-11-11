@@ -8,6 +8,8 @@ const packageJson = JSON.parse(await readFile(new URL('package.json', root), 'ut
 const clientSource = await readFile(new URL('src/api/client.ts', root), 'utf8');
 const storeSource = await readFile(new URL('src/store/demoStore.tsx', root), 'utf8');
 const recoverySource = await readFile(new URL('src/components/screens/ExecutionRecovery.tsx', root), 'utf8');
+const sessionSource = await readFile(new URL('src/auth/session.ts', root), 'utf8');
+const authGateSource = await readFile(new URL('src/components/auth/AuthGate.tsx', root), 'utf8');
 
 test('Vite React is the only frontend entry point', async () => {
   assert.match(indexSource, /src="\/src\/main\.tsx"/);
@@ -60,4 +62,12 @@ test('authoritative requests carry bearer authentication and correlation IDs', (
   assert.match(clientSource, /Authorization: `Bearer \$\{token\}`/);
   assert.match(clientSource, /X-Correlation-ID/);
   assert.match(clientSource, /AUTHENTICATION_REQUIRED/);
+});
+
+test('Auth0 uses runtime public configuration and PKCE without displaying tokens', () => {
+  assert.match(clientSource, /\/runtime-config/);
+  assert.match(sessionSource, /code_challenge_method: 'S256'/);
+  assert.match(sessionSource, /parameters\.audience/);
+  assert.match(authGateSource, /Continue with Auth0/);
+  assert.doesNotMatch(authGateSource, /accessToken|access_token/);
 });

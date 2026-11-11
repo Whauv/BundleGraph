@@ -18,7 +18,7 @@ from .paypal_webhook import PayPalDirectWebhookVerifier
 from .persistence import new_in_memory_application_repositories
 from .planning import PlanningInputsRepository
 from .config import RuntimeMode, application_settings, frontend_origins, production_settings, runtime_mode
-from .auth import ConfiguredBearerAuthenticationProvider, Identity, InMemoryResourceOwnershipRepository, OidcIntrospectionAuthenticationProvider, RejectingAuthenticationProvider
+from .auth import ConfiguredBearerAuthenticationProvider, Identity, InMemoryResourceOwnershipRepository, OidcIntrospectionAuthenticationProvider, OidcJwtAuthenticationProvider, RejectingAuthenticationProvider
 from .postgres import PostgresApplicationMutationRepository, PostgresApprovalRepository, PostgresCatalogRepository, PostgresEvidenceReader, PostgresPaymentRepository, PostgresPlanRepository, PostgresPlanningInputsRepository, PostgresRequirementDraftRepository, PostgresResourceOwnershipRepository, PostgresWebhookEventRepository, postgres_ready
 from .discovery import CatalogCandidateDiscovery, Channel3CandidateDiscovery
 from bundlegraph.channel3 import Channel3DiscoveryAdapter
@@ -40,6 +40,26 @@ def _configured_extraction_provider():
         return configured_provider()
     except ProviderNotConfigured:
         return None
+
+
+def _browser_oidc_config() -> dict[str, str] | None:
+    """Return public browser OIDC settings; never include a client secret."""
+    issuer = os.getenv("BUNDLEGRAPH_OIDC_ISSUER", "").strip().rstrip("/")
+    client_id = os.getenv("BUNDLEGRAPH_OIDC_BROWSER_CLIENT_ID", "").strip()
+    audience = os.getenv("BUNDLEGRAPH_OIDC_AUDIENCE", "").strip()
+    present = (bool(issuer), bool(client_id), bool(audience))
+    if any(present) and not all(present):
+        raise RuntimeError("OIDC issuer, audience, and browser client ID must be configured together")
+    if not all(present):
+        return None
+    return {
+        "provider": "auth0",
+        "authorization_endpoint": f"{issuer}/authorize",
+        "token_endpoint": f"{issuer}/oauth/token",
+        "client_id": client_id,
+        "audience": audience,
+        "scope": os.getenv("BUNDLEGRAPH_OIDC_SCOPE", "openid profile email").strip() or "openid profile email",
+    }
 
 
 def build_demo_app() -> "FastAPI":  # noqa: F821 -- forward reference for lazy FastAPI import
@@ -79,7 +99,9 @@ def build_application_app() -> "FastAPI":  # noqa: F821
     ownership = PostgresResourceOwnershipRepository(settings.database_url)
     identities = {token_hash: Identity(subject=record["subject"], roles=frozenset(record.get("roles", []))) for token_hash, record in settings.auth_identities.items()}
     auth = (
-        OidcIntrospectionAuthenticationProvider(
+        OidcJwtAuthenticationProvider(settings.oidc_issuer, settings.oidc_audience or "")
+        if settings.oidc_issuer
+        else OidcIntrospectionAuthenticationProvider(
             settings.oidc_introspection_url, settings.oidc_client_id or "", settings.oidc_client_secret or "",
             expected_audience=settings.oidc_audience,
         )
@@ -93,7 +115,7 @@ def build_application_app() -> "FastAPI":  # noqa: F821
     channel3_key = os.getenv("CHANNEL3_API_KEY", "").strip()
     discovery = Channel3CandidateDiscovery(Channel3DiscoveryAdapter.from_api_key(channel3_key)) if channel3_key else CatalogCandidateDiscovery(catalogs)
     extraction_provider = _configured_extraction_provider()
-    return build_app(service, evidence_reader, planning, readiness={"persistence": database_ready, "authentication": True, "catalog": catalog_ready, "candidate_provider": bool(channel3_key), "model_provider": extraction_provider is not None, "paypal": False, "webhook_verifier": False}, allowed_origins=frontend_origins(), authentication_provider=auth, ownership=ownership, requirement_drafts=drafts, catalog_repository=catalogs, extraction_provider=extraction_provider, frontend_directory=str(_frontend_directory()), runtime_name="application", candidate_discovery=discovery)
+    return build_app(service, evidence_reader, planning, readiness={"persistence": database_ready, "authentication": True, "catalog": catalog_ready, "candidate_provider": bool(channel3_key), "model_provider": extraction_provider is not None, "paypal": False, "webhook_verifier": False}, allowed_origins=frontend_origins(), authentication_provider=auth, ownership=ownership, requirement_drafts=drafts, catalog_repository=catalogs, extraction_provider=extraction_provider, frontend_directory=str(_frontend_directory()), runtime_name="application", candidate_discovery=discovery, browser_auth_config=_browser_oidc_config())
 
 
 def build_production_app() -> "FastAPI":  # noqa: F821
@@ -108,10 +130,14 @@ def build_production_app() -> "FastAPI":  # noqa: F821
     drafts = PostgresRequirementDraftRepository(settings.database_url)
     catalogs = PostgresCatalogRepository(settings.database_url)
     ownership = PostgresResourceOwnershipRepository(settings.database_url)
+    oidc_issuer = os.getenv("BUNDLEGRAPH_OIDC_ISSUER", "").strip()
+    oidc_audience = os.getenv("BUNDLEGRAPH_OIDC_AUDIENCE", "").strip()
     oidc_url = os.getenv("BUNDLEGRAPH_OIDC_INTROSPECTION_URL", "").strip()
     oidc_client_id = os.getenv("BUNDLEGRAPH_OIDC_CLIENT_ID", "").strip()
     oidc_client_secret = os.getenv("BUNDLEGRAPH_OIDC_CLIENT_SECRET", "").strip()
-    if oidc_url and oidc_client_id and oidc_client_secret:
+    if oidc_issuer and oidc_audience:
+        auth = OidcJwtAuthenticationProvider(oidc_issuer, oidc_audience)
+    elif oidc_url and oidc_client_id and oidc_client_secret:
         auth = OidcIntrospectionAuthenticationProvider(
             oidc_url,
             oidc_client_id,
@@ -164,6 +190,7 @@ def build_production_app() -> "FastAPI":  # noqa: F821
         browser_payment_orchestrator=orchestrator,
         direct_webhook_verifier=direct_webhook_verifier,
         browser_return_base_url=return_base_url,
+        browser_auth_config=_browser_oidc_config(),
     )
 
 

@@ -17,24 +17,18 @@ because the real secrets still need to be rotated through Render's secret UI.
   webhook endpoint are only mounted in this mode. Startup fails fast if any
   secret is missing.
 
-## Hackathon profile (OIDC deferred)
+## Hosted hackathon Auth0 profile
 
-OIDC/Auth0 is not required for the hackathon submission. Use `demo` for the
-public judge-facing synthetic-fixture experience; it requires no access token
-and makes no claim of production authentication. Use `application` plus
-`BUNDLEGRAPH_AUTH_IDENTITIES` only for a controlled PostgreSQL-backed dry run.
+The hosted authoritative/production profile uses Auth0 Universal Login. Configure
+an Auth0 Single Page Application for Authorization Code + PKCE and a custom API
+using RS256. The browser reads only public configuration from `/runtime-config`;
+the API validates JWT signatures through issuer JWKS and checks issuer, audience,
+expiry, and subject. Tokens are never printed or included in telemetry.
 
-The repository Dockerfile defaults `VITE_BUNDLEGRAPH_RUNTIME` to `fixture` for
-this public demo. `compose.sandbox.yml` explicitly builds `authoritative`. A
-future durable deployment must also select `authoritative` during the frontend
-build; changing `BUNDLEGRAPH_MODE` at container startup does not rewrite the
-compiled Vite configuration.
-
-Do not weaken the `production` composition to accommodate the demo. It remains
-fail-closed and requires configured authentication. OIDC setup, browser session
-management, and multi-user production authorization are explicitly deferred
-post-hackathon. PayPal Sandbox lifecycle checks remain available through the
-separate opt-in smoke workflow and are not replaced by fixture UI state.
+The single Docker image builds the authoritative browser adapter. At startup the
+browser reads `/runtime-config`; a `demo` server response safely selects the
+labeled fixture adapter. Production remains fail-closed when authentication is
+missing or incomplete.
 
 ## Local
 
@@ -59,9 +53,13 @@ Environment variables:
 | `BUNDLEGRAPH_MODE` | yes (application/prod) | `application` selects durable planning with payments disabled; `production` is fail-closed. |
 | `DATABASE_URL` | yes (application/prod) | PostgreSQL connection URL; keep it in the deployment secret manager. |
 | `BUNDLEGRAPH_AUTH_IDENTITIES` | controlled application dry run | JSON map of SHA-256 opaque-token hashes to `{subject, roles}`; not required in demo mode. |
-| `BUNDLEGRAPH_OIDC_INTROSPECTION_URL` | post-hackathon production auth | RFC 7662 endpoint used to validate short-lived access tokens. |
-| `BUNDLEGRAPH_OIDC_CLIENT_ID` | with OIDC | Confidential server-side introspection client ID. |
-| `BUNDLEGRAPH_OIDC_CLIENT_SECRET` | with OIDC | Confidential server-side introspection client secret. |
+| `BUNDLEGRAPH_OIDC_ISSUER` | Auth0 | HTTPS tenant issuer, including tenant domain. |
+| `BUNDLEGRAPH_OIDC_BROWSER_CLIENT_ID` | Auth0 | Public SPA client ID returned to the browser. |
+| `BUNDLEGRAPH_OIDC_AUDIENCE` | Auth0 | Custom API identifier required in, and validated from, access tokens. |
+| `BUNDLEGRAPH_OIDC_SCOPE` | Auth0 | Browser scopes; include configured API permissions needed by the demo. |
+| `BUNDLEGRAPH_OIDC_INTROSPECTION_URL` | alternative OIDC auth | RFC 7662 endpoint used to validate short-lived access tokens. |
+| `BUNDLEGRAPH_OIDC_CLIENT_ID` | with introspection | Confidential server-side introspection client ID. |
+| `BUNDLEGRAPH_OIDC_CLIENT_SECRET` | with introspection | Confidential server-side introspection client secret. |
 | `BUNDLEGRAPH_OIDC_AUDIENCE` | optional | Expected access-token audience; mismatches fail closed. |
 | `CHANNEL3_API_KEY` | optional | Enables live candidate discovery; without it discovery reads the active labeled catalog. |
 | `BUNDLEGRAPH_SANDBOX_RECIPIENTS` | yes (prod) | Comma-separated allowlist of sandbox merchant references the adapter may transact with. |
@@ -77,8 +75,8 @@ Environment variables:
 ## Hosted (Render)
 
 - Service type: `web`.
-- Hackathon environment: set `BUNDLEGRAPH_MODE=demo` and rebuild the Docker
-  image. The Dockerfile's fixture default bypasses the local-token sign-in gate.
+- Hosted authoritative demo: set `BUNDLEGRAPH_MODE=production`, configure Auth0,
+  rebuild, and verify `/runtime-config` contains only public Auth0 values.
 - Build: `pip install -e ".[app]"`.
 - Start: `uvicorn bundlegraph_app.main:app --host 0.0.0.0 --port $PORT`.
 - Pre-deploy: `python -m bundlegraph_app.manage migrate`, followed by activation
