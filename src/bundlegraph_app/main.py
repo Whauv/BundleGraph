@@ -172,7 +172,6 @@ def build_production_app() -> "FastAPI":  # noqa: F821
         approvals=approvals,
         plans=plans,
     )
-    return_base_url = os.getenv("BUNDLEGRAPH_PUBLIC_BASE_URL", "").strip() or None
     return build_app(
         service,
         evidence_reader,
@@ -189,7 +188,7 @@ def build_production_app() -> "FastAPI":  # noqa: F821
         candidate_discovery=discovery,
         browser_payment_orchestrator=orchestrator,
         direct_webhook_verifier=direct_webhook_verifier,
-        browser_return_base_url=return_base_url,
+        browser_return_base_url=settings.public_base_url,
         browser_auth_config=_browser_oidc_config(),
     )
 

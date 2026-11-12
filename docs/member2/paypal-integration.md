@@ -49,12 +49,13 @@ two-step workflow because a buyer must approve an `AUTHORIZE` order before the
 server can authorize funds. It is a validator, not the application's enabled
 payment transport; `application` mode remains fail-closed for payments.
 
-Verified official references on 2026-10-28:
+Verified official references on 2026-11-11:
 
 - https://developer.paypal.com/api/rest/authentication
 - https://developer.paypal.com/api/rest/integration/orders-api
 - https://developer.paypal.com/api/payments/v2
 - https://developer.paypal.com/api/rest/webhooks/rest/
+- https://developer.paypal.com/whats-an-order/
 
 No credential was available in the implementation environment, so no sandbox
 call is reported as passed. Offline transport-contract tests verify exact sandbox
@@ -92,11 +93,17 @@ Operator checklist before enabling the live client:
   `operation_id`, and `merchant_allocation_id`. The orchestrator reads the
   persisted plan version, resolves the amount and merchant reference from the
   stored `MerchantAllocation`, and calls `create_order` with that amount only.
-  It persists an `AUTHORIZE` payment operation at `SUBMITTED` with
-  `provider_reference = <order_id>` and returns the PayPal `approval_url`
-  along with server-generated `return_url` and `cancel_url` values anchored on
-  `BUNDLEGRAPH_PUBLIC_BASE_URL`. Browser callers cannot override the amount or
-  recipient: the request body rejects both fields.
+  The server includes its configured HTTPS return and cancel URLs in PayPal's
+  `payment_source.paypal.experience_context`; these values are never supplied by
+  the browser. The operation ID is also stored as the PayPal `custom_id` so a
+  verified webhook can resolve the authoritative operation.
+  It persists an `AUTHORIZE` payment operation at `SUBMITTED` with a separate
+  `provider_order_reference` and `provider_approval_url`, then returns the
+  approval URL along with server-generated return and cancel URLs anchored on
+  `BUNDLEGRAPH_PUBLIC_BASE_URL`. Keeping the order reference separate prevents
+  the later authorization reference from breaking idempotent completion.
+  Browser callers cannot override the amount or recipient: the request body
+  rejects both fields.
 - `POST /payments/browser/complete-order` — accepts the stored `operation_id`,
   calls `authorize_order` and then `capture_authorization` with the persisted
   amount. On success the capture is persisted as a child operation and the
@@ -105,6 +112,12 @@ Operator checklist before enabling the live client:
 - `POST /payments/browser/cancel-order` — accepts the stored `operation_id` and
   marks the operation `FAILED` with reason `BUYER_CANCELLED`. No PayPal call
   is made.
+
+The authoritative frontend enables checkout only when `/runtime-config`
+explicitly advertises `capabilities.payments: true`. It stores only the pending
+operation ID in same-tab session storage before redirecting to PayPal, verifies
+that value on return, and then calls complete or cancel. Amounts, currencies,
+merchant recipients, and allocation contents never come from browser input.
 
 The application first commits a capacity reservation, then performs the provider
 request, then stores the outcome. It does not hold a database lock during network

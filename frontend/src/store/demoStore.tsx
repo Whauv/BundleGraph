@@ -11,9 +11,42 @@ import { dollarsToMinorUnits } from '../utils/money';
 
 const STEPS: ScreenStep[] = ['builder', 'review', 'comparison', 'approval', 'execution'];
 const DEFAULT_PROMPT = 'I want to start a two-person podcast with my USB-C laptop. My equipment budget is $600, and I need microphones, headphones, and all required cables.';
+const PENDING_PAYMENT_KEY = 'bundlegraph.pending_payment_operation';
+let paymentReturn: { key: string; promise: Promise<ExecutionRecord> } | null = null;
+
+function pendingPaymentOperation(): string | null {
+  try { return sessionStorage.getItem(PENDING_PAYMENT_KEY); } catch { return null; }
+}
+
+function rememberPaymentOperation(operationId: string): void {
+  try { sessionStorage.setItem(PENDING_PAYMENT_KEY, operationId); }
+  catch { throw new ApiError(0, 'PAYMENT_SESSION_UNAVAILABLE', 'Browser session storage is required to return safely from PayPal.'); }
+}
+
+function clearPaymentOperation(): void {
+  try { sessionStorage.removeItem(PENDING_PAYMENT_KEY); } catch { /* The server remains authoritative. */ }
+}
+
+function resolvePaymentReturn(returnState: string, operationId: string): Promise<ExecutionRecord> {
+  const key = `${returnState}:${operationId}`;
+  if (paymentReturn?.key !== key) {
+    const promise: Promise<ExecutionRecord> = returnState === 'approved'
+      ? api.completeBrowserOrder(operationId).then((completed) => ({
+          execution_status: 'PAYMENT_CAPTURED', transaction_id: completed.capture_reference, plan_id: completed.plan_id,
+          amount_minor: completed.amount.amount_minor, currency: completed.amount.currency, approval_id: completed.approval_id,
+          message: 'PayPal Sandbox buyer approval was recorded and the persisted merchant allocation was captured.',
+        }))
+      : api.cancelBrowserOrder(operationId).then((cancelled) => ({
+          execution_status: 'PAYMENT_CANCELLED', plan_id: cancelled.plan_id, approval_id: cancelled.approval_id,
+          message: 'The PayPal Sandbox checkout was cancelled. No capture was performed.',
+        }));
+    paymentReturn = { key, promise };
+  }
+  return paymentReturn!.promise;
+}
 
 interface DemoContextType {
-  runtimeMode: FrontendRuntimeMode; runtimeLabel: string; currentStep: ScreenStep;
+  runtimeMode: FrontendRuntimeMode; runtimeLabel: string; paymentEnabled: boolean; currentStep: ScreenStep;
   setStep: (step: ScreenStep) => void; canNavigate: (step: ScreenStep) => boolean; navigationNotice: string | null;
   promptText: string; setPromptText: (text: string) => void;
   useCase: string; setUseCase: (value: string) => void; reviewDisagreements: string[];
@@ -149,8 +182,33 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setFailedOperation(retryable ? operation : null); setPipelineStage('failed'); setIsLoading(false);
   };
 
+  useEffect(() => {
+    if (frontendRuntime.mode !== 'authoritative') return;
+    const params = new URLSearchParams(window.location.search);
+    const returnState = params.get('payment_return');
+    const operationId = params.get('operation_id');
+    if (!returnState && !operationId) return;
+    if (!operationId || !['approved', 'cancelled'].includes(returnState || '') || pendingPaymentOperation() !== operationId) {
+      window.queueMicrotask(() => {
+        setApiFailure({ status: 400, reason_code: 'INVALID_PAYMENT_RETURN', message: 'The PayPal return did not match the payment started in this browser session.' });
+        setPipelineStage('failed');
+      });
+      return;
+    }
+    const token = { identity: ++operationRef.current, revision: revisionRef.current };
+    window.queueMicrotask(() => {
+      setPipelineStage('persisting_plan'); setIsLoading(true); setApiFailure(null); setErrorMessage(null);
+      void resolvePaymentReturn(returnState!, operationId).then((execution) => {
+        if (!isCurrent(token)) return;
+        setExecutionRecord(execution); clearPaymentOperation(); setPipelineStage('complete'); setIsLoading(false);
+        window.history.replaceState({}, '', `${window.location.pathname}#/execution`); commitStep('execution', true);
+      }).catch((error: unknown) => captureError(error, 'execute', token, false));
+    });
+  }, [commitStep]);
+
   const clearDownstream = (includeInterpretation = false) => {
     if (includeInterpretation) { setInterpretation(null); setDraftVersion(null); }
+    clearPaymentOperation();
     setConfirmedRequirements(null); setProposals([]); setSelectedProposal(null); setAuthoritativePlan(null);
     setEvidenceRecords([]); setEvidenceLoadStatus('idle'); setApprovalRecord(null); setExecutionRecord(null); setReplanResult(null);
     setSearchResult((current) => ({ status: current.status === 'idle' ? 'idle' : 'stale', reason_codes: [], result_revision: current.result_revision + 1 }));
@@ -268,8 +326,22 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const executeOrder = async (injectFailureOfferId?: string) => {
-    if (!approvalRecord?.valid || !selectedProposal) return; const token = beginOperation('execute', 'persisting_plan');
+    if (!approvalRecord?.valid || !selectedProposal || !authoritativePlan) return; const token = beginOperation('execute', 'persisting_plan');
     try {
+      if (frontendRuntime.mode === 'authoritative') {
+        const version = authoritativePlan.versions.find((item) => item.version === authoritativePlan.current_version);
+        if (!frontendRuntime.payments) throw new ApiError(409, 'PAYMENT_EXECUTION_NOT_ENABLED', 'The server did not advertise browser payment support.');
+        if (!version || version.merchant_allocations.length !== 1) throw new ApiError(422, 'BROWSER_PAYMENT_ALLOCATION_UNSUPPORTED', 'Browser checkout currently requires exactly one persisted merchant allocation.');
+        // Keep the same operation id across retries so an uncertain HTTP
+        // response cannot create a second server-side payment reservation.
+        const operationId = pendingPaymentOperation() || `payop-${crypto.randomUUID()}`;
+        rememberPaymentOperation(operationId);
+        const created = await api.createBrowserOrder(approvalRecord.approval_id, version.merchant_allocations[0].allocation_id, operationId);
+        if (!isCurrent(token)) return;
+        if (created.operation_id !== operationId) throw new ApiError(502, 'PAYMENT_OPERATION_MISMATCH', 'The payment response did not match the requested operation.');
+        window.location.assign(created.approval_url);
+        return;
+      }
       const execution = await api.simulateExecution({ approval_id: approvalRecord.approval_id, plan_id: approvalRecord.plan_id, plan_version: approvalRecord.plan_version, amount_minor: approvalRecord.amount_minor, currency: approvalRecord.currency, inject_failure_offer_id: injectFailureOfferId });
       if (!isCurrent(token)) return; setExecutionRecord(execution);
       if (execution.approval_invalidated) setApprovalRecord((current) => current ? { ...current, valid: false, status: 'INVALIDATED_BY_RECORDED_EXECUTION' } : null);
@@ -308,7 +380,7 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const dismissFailure = () => { setApiFailure(null); setErrorMessage(null); setFailedOperation(null); if (pipelineStage === 'failed') setPipelineStage('idle'); };
 
   return <DemoContext.Provider value={{
-    runtimeMode: frontendRuntime.mode, runtimeLabel: frontendRuntime.label, currentStep, setStep, canNavigate, navigationNotice,
+    runtimeMode: frontendRuntime.mode, runtimeLabel: frontendRuntime.label, paymentEnabled: frontendRuntime.payments, currentStep, setStep, canNavigate, navigationNotice,
     promptText, setPromptText: (value) => applyInput(setPromptTextState, value), useCase, setUseCase: (value) => applyInput(setUseCaseState, value), reviewDisagreements, budgetDollars, setBudgetDollars: (value) => applyInput(setBudgetDollarsState, value),
     participants, setParticipants: (value) => applyInput(setParticipantsState, value), laptopConnector, setLaptopConnector: (value) => applyInput(setLaptopConnectorState, value),
     listeningRequirement, setListeningRequirement: (value) => applyInput(setListeningRequirementState, value), deadlineDate, setDeadlineDate: (value) => applyInput(setDeadlineDateState, value),

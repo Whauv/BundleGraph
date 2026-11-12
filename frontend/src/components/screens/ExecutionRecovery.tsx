@@ -16,7 +16,9 @@ export const ExecutionRecovery: React.FC = () => {
 
   const failed = executionRecord?.execution_status === 'FAILED_MERCHANT_STOCK_OUTAGE';
   const simulatedComplete = runtimeMode === 'fixture' && executionRecord?.execution_status === 'COMPLETED';
-  const status = replanResult ? 'Recovery proposal available' : failed ? 'Execution failed' : simulatedComplete ? 'Simulated execution completed' : executionRecord ? 'Execution recorded' : 'No execution recorded';
+  const paymentCaptured = executionRecord?.execution_status === 'PAYMENT_CAPTURED';
+  const paymentCancelled = executionRecord?.execution_status === 'PAYMENT_CANCELLED';
+  const status = replanResult ? 'Recovery proposal available' : failed ? 'Execution failed' : paymentCaptured ? 'PayPal Sandbox payment captured' : paymentCancelled ? 'PayPal Sandbox checkout cancelled' : simulatedComplete ? 'Simulated execution completed' : executionRecord ? 'Execution recorded' : 'No execution recorded';
 
   const copyReference = async () => {
     try { await navigator.clipboard.writeText(authoritativePlan?.plan_id || executionRecord?.plan_id || ''); setCopyStatus('Copied'); }
@@ -45,10 +47,10 @@ export const ExecutionRecovery: React.FC = () => {
 
   return <div className="screen-container recovery-screen">
     <header className="screen-heading"><p className="eyebrow">Plan activity</p><h1>Track and recover</h1><p>Review recorded execution facts and replacement proposals. BundleGraph never silently substitutes equipment or carries approval to a changed plan.</p></header>
-    <section className={`execution-status execution-status--${failed ? 'error' : simulatedComplete ? 'success' : replanResult ? 'warning' : 'neutral'}`}>
-      <div>{failed ? <AlertTriangle size={24} /> : simulatedComplete ? <CheckCircle2 size={24} /> : <PackageSearch size={24} />}</div>
+    <section className={`execution-status execution-status--${failed ? 'error' : simulatedComplete || paymentCaptured ? 'success' : replanResult || paymentCancelled ? 'warning' : 'neutral'}`}>
+      <div>{failed || paymentCancelled ? <AlertTriangle size={24} /> : simulatedComplete || paymentCaptured ? <CheckCircle2 size={24} /> : <PackageSearch size={24} />}</div>
       <div><p className="eyebrow">Current status</p><h2>{status}</h2><p>{executionRecord?.message || 'No execution record has been supplied by the backend.'}</p></div>
-      <dl><div><dt>Recorded amount</dt><dd>{executionRecord?.amount_minor !== undefined && executionRecord.currency ? money({ amount_minor: executionRecord.amount_minor, currency: executionRecord.currency }) : 'Not recorded'}</dd></div><div><dt>Plan version</dt><dd>{authoritativePlan?.current_version || 'Not recorded'}</dd></div><div><dt>Payment scope</dt><dd>{simulatedComplete ? 'Fixture simulation' : executionRecord ? 'Use recorded provider status' : 'None'}</dd></div></dl>
+      <dl><div><dt>Recorded amount</dt><dd>{executionRecord?.amount_minor !== undefined && executionRecord.currency ? money({ amount_minor: executionRecord.amount_minor, currency: executionRecord.currency }) : 'Not recorded'}</dd></div><div><dt>Plan version</dt><dd>{authoritativePlan?.current_version || 'Not recorded'}</dd></div><div><dt>Payment scope</dt><dd>{simulatedComplete ? 'Fixture simulation' : paymentCaptured || paymentCancelled ? 'PayPal Sandbox' : executionRecord ? 'Use recorded provider status' : 'None'}</dd></div></dl>
     </section>
 
     {failed && !replanResult && <section className="empty-state-panel"><RefreshCw size={25} /><div><h2>Replacement options have not been requested</h2><p>The failed offer is {executionRecord?.failed_offer_id || 'not identified'}.</p><button type="button" className="btn-primary" onClick={() => void triggerReplan(executionRecord?.failed_offer_id)} disabled={isLoading}>{isLoading ? 'Requesting replacements…' : 'Find replacement options'}</button></div></section>}

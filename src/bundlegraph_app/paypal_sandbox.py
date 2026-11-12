@@ -27,7 +27,12 @@ class HttpxJsonTransport:
         self._client = httpx.Client(timeout=timeout_seconds)
 
     def request(self, method: str, url: str, *, headers: dict[str, str], json: dict[str, Any] | None = None, data: dict[str, str] | None = None) -> tuple[int, dict[str, Any]]:
-        response = self._client.request(method, url, headers=headers, json=json, data=data)
+        try:
+            response = self._client.request(method, url, headers=headers, json=json, data=data)
+        except Exception as exc:
+            # The concrete transport exception type belongs to the installed
+            # httpx version; callers receive one stable provider error.
+            raise PayPalSandboxProtocolError("PayPal transport request failed") from exc
         try:
             payload = response.json() if response.content else {}
         except ValueError as exc:
@@ -79,8 +84,16 @@ class PayPalSandboxOrdersClient:
             raise PayPalSandboxProtocolError(f"PayPal sandbox request failed with HTTP {status}{suffix}")
         return payload
 
-    def create_order(self, *, amount: Money, request_id: str) -> SandboxOrder:
-        payload = self._api("POST", "/v2/checkout/orders", request_id=request_id, body={"intent": "AUTHORIZE", "purchase_units": [{"reference_id": request_id, "amount": _paypal_amount(amount)}]})
+    def create_order(self, *, amount: Money, request_id: str, return_url: str | None = None, cancel_url: str | None = None, custom_id: str | None = None) -> SandboxOrder:
+        if bool(return_url) != bool(cancel_url):
+            raise ValueError("PayPal return_url and cancel_url must be configured together")
+        purchase_unit: dict[str, Any] = {"reference_id": request_id, "amount": _paypal_amount(amount)}
+        if custom_id:
+            purchase_unit["custom_id"] = custom_id
+        body: dict[str, Any] = {"intent": "AUTHORIZE", "purchase_units": [purchase_unit]}
+        if return_url and cancel_url:
+            body["payment_source"] = {"paypal": {"experience_context": {"return_url": return_url, "cancel_url": cancel_url, "user_action": "PAY_NOW"}}}
+        payload = self._api("POST", "/v2/checkout/orders", request_id=request_id, body=body)
         order_id = payload.get("id")
         approval_url = next((link.get("href") for link in payload.get("links", []) if link.get("rel") in {"approve", "payer-action"}), None)
         if not isinstance(order_id, str) or not isinstance(approval_url, str) or not approval_url.startswith("https://"):

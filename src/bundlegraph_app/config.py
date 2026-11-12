@@ -21,6 +21,7 @@ class ProductionSettings:
     paypal_client_secret: str
     paypal_webhook_id: str
     sandbox_recipients: frozenset[str]
+    public_base_url: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,12 +102,17 @@ def frontend_origins(environ: dict[str, str] | None = None) -> tuple[str, ...]:
 
 def production_settings(environ: dict[str, str] | None = None) -> ProductionSettings:
     values = environ or os.environ
-    required = ("DATABASE_URL", "PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "PAYPAL_WEBHOOK_ID", "BUNDLEGRAPH_SANDBOX_RECIPIENTS")
+    required = ("DATABASE_URL", "PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "PAYPAL_WEBHOOK_ID", "BUNDLEGRAPH_SANDBOX_RECIPIENTS", "BUNDLEGRAPH_PUBLIC_BASE_URL")
     missing = tuple(name for name in required if not values.get(name, "").strip())
     if missing:
         raise RuntimeError(f"production startup blocked: missing {', '.join(missing)}")
+    public_base_url = values["BUNDLEGRAPH_PUBLIC_BASE_URL"].strip().rstrip("/")
+    parsed_base_url = urlsplit(public_base_url)
+    if parsed_base_url.scheme != "https" or not parsed_base_url.netloc or parsed_base_url.username or parsed_base_url.password or parsed_base_url.path not in {"", "/"} or parsed_base_url.query or parsed_base_url.fragment:
+        raise RuntimeError("BUNDLEGRAPH_PUBLIC_BASE_URL must be an HTTPS origin without paths or credentials")
     return ProductionSettings(
         database_url=values["DATABASE_URL"], paypal_client_id=values["PAYPAL_CLIENT_ID"],
         paypal_client_secret=values["PAYPAL_CLIENT_SECRET"], paypal_webhook_id=values["PAYPAL_WEBHOOK_ID"],
         sandbox_recipients=frozenset(item.strip() for item in values["BUNDLEGRAPH_SANDBOX_RECIPIENTS"].split(",") if item.strip()),
+        public_base_url=public_base_url,
     )

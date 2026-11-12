@@ -1,6 +1,6 @@
 import type {
   ApiFailure, ApprovalRecord, AuthoritativePlan, BundleProposal, ConfirmedRequirements,
-  EvidenceRecord, ExecutionRecord, PresetScenario, ReplanResult, RequirementInterpretation,
+  EvidenceRecord, ExecutionRecord, Money, PresetScenario, ReplanResult, RequirementInterpretation,
 } from '../types/bundlegraph';
 import { clearSession, getAccessToken } from '../auth/session';
 import type { BrowserOidcConfig } from '../auth/session';
@@ -15,16 +15,18 @@ const DEFAULT_TIMEOUT_MS = Number.isFinite(configuredTimeout) && configuredTimeo
 const fixture = createFixtureAdapter();
 
 export type FrontendRuntimeMode = 'fixture' | 'authoritative';
-export const frontendRuntime: { mode: FrontendRuntimeMode; label: string; apiBase: string | null } = {
+export const frontendRuntime: { mode: FrontendRuntimeMode; label: string; apiBase: string | null; payments: boolean } = {
   mode: (configuredRuntime === 'authoritative' ? 'authoritative' : 'fixture') as FrontendRuntimeMode,
   label: configuredRuntime === 'authoritative' ? 'Authoritative application API' : 'Synthetic offline fixtures',
   apiBase: configuredRuntime === 'authoritative' ? API_BASE : null,
+  payments: false,
 };
 
 interface RuntimeConfiguration {
   runtime: string;
   api_base: string;
   authentication: BrowserOidcConfig | null;
+  capabilities?: { payments?: boolean };
 }
 
 export async function loadRuntimeConfiguration(): Promise<BrowserOidcConfig | null> {
@@ -37,6 +39,7 @@ export async function loadRuntimeConfiguration(): Promise<BrowserOidcConfig | nu
   frontendRuntime.mode = runtime.runtime === 'demo' ? 'fixture' : 'authoritative';
   frontendRuntime.label = frontendRuntime.mode === 'fixture' ? 'Synthetic offline fixtures' : 'Authoritative application API';
   frontendRuntime.apiBase = frontendRuntime.mode === 'authoritative' ? API_BASE : null;
+  frontendRuntime.payments = frontendRuntime.mode === 'authoritative' && runtime.capabilities?.payments === true;
   if (runtime.authentication === null) return null;
   const auth = runtime.authentication as unknown;
   if (!isRecord(auth) || !isString(auth.authorization_endpoint) || !isString(auth.token_endpoint) || !isString(auth.client_id)) throw new Error('Runtime authentication configuration was invalid');
@@ -147,6 +150,36 @@ function asGeneration(value: unknown) {
   return value as unknown as { status: string; reason_codes: string[]; result: { proposals: BundleProposal[]; search_status: string; evaluated_candidates?: number; infeasibility?: { reason_codes: string[]; explanation?: string } | null } };
 }
 
+export interface BrowserPaymentCreated {
+  operation_id: string;
+  order_id: string;
+  approval_url: string;
+  amount: Money;
+  merchant_reference: string;
+  status: 'awaiting_buyer_approval';
+}
+
+export interface BrowserPaymentCompleted {
+  authorize_operation_id: string;
+  capture_operation_id: string;
+  order_id: string;
+  capture_reference: string;
+  status: string;
+  amount: Money;
+  plan_id: string;
+  plan_version: number;
+  approval_id: string;
+}
+
+export interface BrowserPaymentCancelled {
+  operation_id: string;
+  status: string;
+  failure_reason_code: string | null;
+  plan_id: string;
+  plan_version: number;
+  approval_id: string;
+}
+
 function translateFixture<T>(action: () => Promise<T>): Promise<T> {
   return action().catch((error) => {
     if (error instanceof FixtureContractError) throw new ApiError(error.status, error.reason_code, error.message, 'synthetic-fixture');
@@ -191,6 +224,23 @@ export const api = {
     const approval = value.approval;
     const permittedTotal = approval.permitted_total as Record<string, unknown>;
     return { approval_id: approval.approval_id as string, plan_id: approval.plan_id as string, plan_version: String(approval.plan_version), plan_fingerprint: approval.plan_fingerprint as string, amount_minor: permittedTotal.amount_minor as number, currency: permittedTotal.currency as string, status: approval.status as string, created_at: typeof approval.granted_at === 'string' ? approval.granted_at : new Date().toISOString(), valid: approval.status === 'granted' };
+  },
+  async createBrowserOrder(approvalId: string, merchantAllocationId: string, operationId: string): Promise<BrowserPaymentCreated> {
+    if (!frontendRuntime.payments) throw new ApiError(409, 'PAYMENT_EXECUTION_NOT_ENABLED', 'The server did not advertise browser payment support.');
+    const value = await requestJson('/payments/browser/create-order', { method: 'POST', body: JSON.stringify({ approval_id: approvalId, merchant_allocation_id: merchantAllocationId, operation_id: operationId }) });
+    if (!isRecord(value) || !isString(value.operation_id) || !isString(value.order_id) || !isString(value.approval_url) || !value.approval_url.startsWith('https://') || !isRecord(value.amount) || value.status !== 'awaiting_buyer_approval') invalidResponse('', '/payments/browser/create-order');
+    return value as unknown as BrowserPaymentCreated;
+  },
+  async completeBrowserOrder(operationId: string): Promise<BrowserPaymentCompleted> {
+    const value = await requestJson('/payments/browser/complete-order', { method: 'POST', body: JSON.stringify({ operation_id: operationId }) });
+    if (!isRecord(value) || !isString(value.capture_operation_id) || !isString(value.capture_reference) || !isRecord(value.amount) || !isString(value.plan_id) || !isInteger(value.plan_version) || !isString(value.approval_id) || !isString(value.status)) invalidResponse('', '/payments/browser/complete-order');
+    if (value.status !== 'succeeded') throw new ApiError(422, 'PAYMENT_CAPTURE_NOT_SUCCEEDED', 'PayPal did not report a successful capture. No successful payment will be displayed.');
+    return value as unknown as BrowserPaymentCompleted;
+  },
+  async cancelBrowserOrder(operationId: string): Promise<BrowserPaymentCancelled> {
+    const value = await requestJson('/payments/browser/cancel-order', { method: 'POST', body: JSON.stringify({ operation_id: operationId }) });
+    if (!isRecord(value) || !isString(value.operation_id) || !isString(value.status) || !isString(value.plan_id) || !isInteger(value.plan_version) || !isString(value.approval_id)) invalidResponse('', '/payments/browser/cancel-order');
+    return value as unknown as BrowserPaymentCancelled;
   },
   async replanBundle(plan: AuthoritativePlan, failedOfferId: string): Promise<ReplanResult> {
     if (frontendRuntime.mode === 'fixture') return translateFixture(() => fixture.replan(plan, failedOfferId));

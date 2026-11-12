@@ -266,7 +266,7 @@ export interface ApiFailure {
 }
 
 export interface ExecutionRecord {
-  execution_status: 'COMPLETED' | 'FAILED_MERCHANT_STOCK_OUTAGE';
+  execution_status: 'COMPLETED' | 'FAILED_MERCHANT_STOCK_OUTAGE' | 'PAYMENT_CAPTURED' | 'PAYMENT_CANCELLED';
   transaction_id?: string;
   plan_id: string;
   amount_minor?: number;

@@ -12,7 +12,7 @@ from typing import Callable
 
 from .ids import new_id
 from .paypal import PayPalAdapter
-from .paypal_sandbox import PayPalSandboxOrdersClient, PayPalSandboxProtocolError
+from .paypal_sandbox import PayPalSandboxOrdersClient, PayPalSandboxProtocolError, SandboxOrder
 from .persistence import ApprovalRepository, PaymentRepository, PlanRepository
 from .state import (
     ApprovalStatus,
@@ -54,6 +54,9 @@ class CompletedPayment:
     status: str
     amount: Money
     merchant_reference: str
+    plan_id: str
+    plan_version: int
+    approval_id: str
 
 
 class BrowserPaymentOrchestrator:
@@ -80,6 +83,8 @@ class BrowserPaymentOrchestrator:
         approval_id: str,
         operation_id: str,
         merchant_allocation_id: str,
+        return_url: str,
+        cancel_url: str,
     ) -> CreatedOrder:
         approval = self._approvals.get(approval_id)
         if approval is None or approval.status is not ApprovalStatus.GRANTED:
@@ -109,6 +114,8 @@ class BrowserPaymentOrchestrator:
         existing = self._payments.get(operation_id)
         if existing is not None:
             _require_same_request(existing, operation)
+            if not existing.provider_order_reference and not existing.provider_approval_url and existing.status in {PaymentOperationStatus.SUBMITTED, PaymentOperationStatus.UNCERTAIN}:
+                self._create_provider_order(existing, return_url=return_url, cancel_url=cancel_url)
             return self._as_created(existing)
         try:
             stored, created = self._payments.reserve(operation)
@@ -116,21 +123,15 @@ class BrowserPaymentOrchestrator:
             raise BrowserPaymentError("payment capacity is already reserved") from exc
         if not created:
             _require_same_request(stored, operation)
+            if not stored.provider_order_reference and not stored.provider_approval_url and stored.status in {PaymentOperationStatus.SUBMITTED, PaymentOperationStatus.UNCERTAIN}:
+                self._create_provider_order(stored, return_url=return_url, cancel_url=cancel_url)
             return self._as_created(stored)
         if plan.status is PlanStatus.APPROVED:
             ensure_plan_transition(plan.status, PlanStatus.EXECUTING)
             plan.status = PlanStatus.EXECUTING
             plan.updated_at = now
             self._plans.save(plan)
-        try:
-            order = self._orders.create_order(amount=allocation.amount, request_id=request_id)
-        except PayPalSandboxProtocolError as exc:
-            stored.status = PaymentOperationStatus.UNCERTAIN
-            stored.failure_reason_code = "CREATE_ORDER_OUTCOME_UNKNOWN"
-            self._payments.save(stored)
-            raise BrowserPaymentError(f"PayPal rejected create-order: {exc}") from exc
-        stored.provider_reference = order.order_id
-        self._payments.save(stored)
+        order = self._create_provider_order(stored, return_url=return_url, cancel_url=cancel_url)
         return CreatedOrder(
             operation_id=stored.operation_id,
             order_id=order.order_id,
@@ -139,13 +140,36 @@ class BrowserPaymentOrchestrator:
             merchant_reference=allocation.merchant_reference,
         )
 
+    def _create_provider_order(self, operation: PaymentOperation, *, return_url: str, cancel_url: str) -> SandboxOrder:
+        try:
+            order = self._orders.create_order(
+                amount=operation.amount,
+                request_id=operation.idempotency_key,
+                return_url=return_url,
+                cancel_url=cancel_url,
+                custom_id=operation.operation_id,
+            )
+        except PayPalSandboxProtocolError as exc:
+            # Creating an order does not authorize or move money. Keep the
+            # reserved authorization SUBMITTED so the same PayPal idempotency
+            # key can safely resolve a lost create-order response.
+            operation.failure_reason_code = "CREATE_ORDER_OUTCOME_UNKNOWN"
+            self._payments.save(operation)
+            raise BrowserPaymentError(f"PayPal rejected create-order: {exc}") from exc
+        operation.provider_reference = order.order_id
+        operation.provider_order_reference = order.order_id
+        operation.provider_approval_url = order.approval_url
+        operation.failure_reason_code = None
+        self._payments.save(operation)
+        return order
+
     def complete_order(self, *, operation_id: str) -> CompletedPayment:
         authorize_op = self._payments.get(operation_id)
         if authorize_op is None:
             raise BrowserPaymentError("payment operation not found")
         if authorize_op.kind is not PaymentOperationKind.AUTHORIZE:
             raise BrowserPaymentError("payment operation is not a browser order authorization")
-        order_id = authorize_op.provider_reference
+        order_id = authorize_op.provider_order_reference or authorize_op.provider_reference
         if not order_id:
             raise BrowserPaymentError("payment operation has no PayPal order reference")
         if authorize_op.status is PaymentOperationStatus.FAILED:
@@ -154,6 +178,8 @@ class BrowserPaymentOrchestrator:
         capture_operation_id = f"{authorize_op.operation_id}-capture"
         existing_capture = self._payments.get(capture_operation_id)
         if existing_capture is not None:
+            if existing_capture.status is not PaymentOperationStatus.SUCCEEDED:
+                raise BrowserPaymentError("the stored capture requires reconciliation", existing_capture.failure_reason_code or "CAPTURE_NOT_SUCCEEDED")
             return self._as_completed(authorize_op, order_id, authorization_id, existing_capture)
         capture_request_id = PayPalAdapter.idempotency_key(capture_operation_id, PaymentOperationKind.CAPTURE)
         now = self._now()
@@ -176,17 +202,10 @@ class BrowserPaymentOrchestrator:
         except ValueError as exc:
             raise BrowserPaymentError("authorization already has an active capture") from exc
         if not created:
+            if capture_operation.status is not PaymentOperationStatus.SUCCEEDED:
+                raise BrowserPaymentError("the reserved capture requires reconciliation", capture_operation.failure_reason_code or "CAPTURE_NOT_SUCCEEDED")
             return self._as_completed(authorize_op, order_id, authorization_id, capture_operation)
-        try:
-            capture_id = self._orders.capture_authorization(
-                authorization_id=authorization_id,
-                amount=authorize_op.amount,
-                request_id=capture_request_id,
-            )
-        except PayPalSandboxProtocolError as exc:
-            self._mark_failed(capture_operation, reason_code="CAPTURE_REJECTED")
-            raise BrowserPaymentError(f"PayPal rejected capture: {exc}") from exc
-        self._mark_succeeded(capture_operation, provider_reference=capture_id)
+        self._capture_authorization(capture_operation, authorization_id)
         self._refresh_plan_after_capture(capture_operation)
         return self._as_completed(authorize_op, order_id, authorization_id, capture_operation)
 
@@ -203,16 +222,30 @@ class BrowserPaymentOrchestrator:
         return self._mark_failed(authorize_op, reason_code="BUYER_CANCELLED")
 
     def _authorize_order(self, authorize_op: PaymentOperation, order_id: str) -> str:
-        if authorize_op.status is PaymentOperationStatus.SUCCEEDED and authorize_op.provider_reference and authorize_op.provider_reference != order_id:
+        if authorize_op.status is PaymentOperationStatus.SUCCEEDED and authorize_op.provider_reference:
             return authorize_op.provider_reference
+        if authorize_op.status is PaymentOperationStatus.UNCERTAIN:
+            raise BrowserPaymentError("the stored authorization requires reconciliation", authorize_op.failure_reason_code or "AUTHORIZATION_OUTCOME_UNKNOWN")
         request_id = PayPalAdapter.idempotency_key(authorize_op.operation_id + "-authorize", PaymentOperationKind.AUTHORIZE)
         try:
             authorization_id = self._orders.authorize_order(order_id=order_id, request_id=request_id)
         except PayPalSandboxProtocolError as exc:
-            self._mark_failed(authorize_op, reason_code="AUTHORIZATION_REJECTED")
+            self._mark_uncertain(authorize_op, reason_code="AUTHORIZATION_OUTCOME_UNKNOWN")
             raise BrowserPaymentError(f"PayPal rejected authorize: {exc}") from exc
         self._mark_succeeded(authorize_op, provider_reference=authorization_id)
         return authorization_id
+
+    def _capture_authorization(self, capture_operation: PaymentOperation, authorization_id: str) -> PaymentOperation:
+        try:
+            capture_id = self._orders.capture_authorization(
+                authorization_id=authorization_id,
+                amount=capture_operation.amount,
+                request_id=capture_operation.idempotency_key,
+            )
+        except PayPalSandboxProtocolError as exc:
+            self._mark_uncertain(capture_operation, reason_code="CAPTURE_OUTCOME_UNKNOWN")
+            raise BrowserPaymentError(f"PayPal rejected capture: {exc}") from exc
+        return self._mark_succeeded(capture_operation, provider_reference=capture_id)
 
     def _mark_succeeded(self, operation: PaymentOperation, *, provider_reference: str) -> PaymentOperation:
         ensure_payment_transition(operation.status, PaymentOperationStatus.SUCCEEDED)
@@ -231,14 +264,23 @@ class BrowserPaymentOrchestrator:
         self._payments.save(operation)
         return operation
 
+    def _mark_uncertain(self, operation: PaymentOperation, *, reason_code: str) -> PaymentOperation:
+        ensure_payment_transition(operation.status, PaymentOperationStatus.UNCERTAIN)
+        operation.status = PaymentOperationStatus.UNCERTAIN
+        operation.failure_reason_code = reason_code
+        self._payments.save(operation)
+        return operation
+
     def _as_created(self, operation: PaymentOperation) -> CreatedOrder:
-        order_id = operation.provider_reference
+        order_id = operation.provider_order_reference or operation.provider_reference
         if not order_id:
             raise BrowserPaymentError("stored operation has no PayPal order reference")
+        if not operation.provider_approval_url:
+            raise BrowserPaymentError("stored operation has no PayPal approval URL")
         return CreatedOrder(
             operation_id=operation.operation_id,
             order_id=order_id,
-            approval_url="",
+            approval_url=operation.provider_approval_url,
             amount=operation.amount,
             merchant_reference=operation.recipient_reference,
         )
@@ -276,6 +318,9 @@ class BrowserPaymentOrchestrator:
             status=capture_op.status.value,
             amount=authorize_op.amount,
             merchant_reference=authorize_op.recipient_reference,
+            plan_id=authorize_op.plan_id,
+            plan_version=authorize_op.plan_version,
+            approval_id=authorize_op.approval_id,
         )
 
 

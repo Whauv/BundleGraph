@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -673,17 +673,23 @@ def build_app(
     if browser_payment_orchestrator is not None:
         orchestrator = browser_payment_orchestrator
         return_base = (browser_return_base_url or "").rstrip("/")
+        if not return_base:
+            raise ValueError("browser_return_base_url is required when browser payments are enabled")
 
         @app.post("/payments/browser/create-order")
         def create_browser_order(body: CreateBrowserOrderBody, identity: Identity = Depends(require_identity)) -> dict[str, Any]:
             require_role(identity, "payments:execute")
             require_owner(identity, "approval", body.approval_id)
             require_new_or_owned_operation(identity, body.operation_id)
+            return_url = f"{return_base}/?{urlencode({'payment_return': 'approved', 'operation_id': body.operation_id})}"
+            cancel_url = f"{return_base}/?{urlencode({'payment_return': 'cancelled', 'operation_id': body.operation_id})}"
             try:
                 created = orchestrator.create_order(
                     approval_id=body.approval_id,
                     operation_id=body.operation_id,
                     merchant_allocation_id=body.merchant_allocation_id,
+                    return_url=return_url,
+                    cancel_url=cancel_url,
                 )
             except BrowserPaymentError as exc:
                 code = status.HTTP_409_CONFLICT if exc.reason_code == "IDEMPOTENCY_MISMATCH" else status.HTTP_422_UNPROCESSABLE_ENTITY
@@ -697,9 +703,8 @@ def build_app(
                 "merchant_reference": created.merchant_reference,
                 "status": "awaiting_buyer_approval",
             }
-            if return_base:
-                payload["return_url"] = f"{return_base}/payments/browser/return?operation_id={created.operation_id}"
-                payload["cancel_url"] = f"{return_base}/payments/browser/cancel?operation_id={created.operation_id}"
+            payload["return_url"] = return_url
+            payload["cancel_url"] = cancel_url
             return payload
 
         @app.post("/payments/browser/complete-order")
@@ -720,6 +725,9 @@ def build_app(
                 "status": completed.status,
                 "amount": completed.amount.model_dump(mode="json"),
                 "merchant_reference": completed.merchant_reference,
+                "plan_id": completed.plan_id,
+                "plan_version": completed.plan_version,
+                "approval_id": completed.approval_id,
             }
 
         @app.post("/payments/browser/cancel-order")
@@ -734,6 +742,9 @@ def build_app(
                 "operation_id": operation.operation_id,
                 "status": operation.status.value,
                 "failure_reason_code": operation.failure_reason_code,
+                "plan_id": operation.plan_id,
+                "plan_version": operation.plan_version,
+                "approval_id": operation.approval_id,
             }
 
     if frontend_directory:

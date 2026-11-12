@@ -25,6 +25,21 @@ def test_production_settings_round_trip() -> None:
         "PAYPAL_CLIENT_SECRET": "s",
         "PAYPAL_WEBHOOK_ID": "WH-abc",
         "BUNDLEGRAPH_SANDBOX_RECIPIENTS": "sandbox-a,sandbox-b",
+        "BUNDLEGRAPH_PUBLIC_BASE_URL": "https://bundle.example/",
     })
     assert settings.paypal_webhook_id == "WH-abc"
     assert settings.sandbox_recipients == frozenset({"sandbox-a", "sandbox-b"})
+    assert settings.public_base_url == "https://bundle.example"
+
+
+@pytest.mark.parametrize("value", ["http://bundle.example", "https://bundle.example/path", "https://user:secret@bundle.example"])
+def test_production_settings_reject_unsafe_public_base_url(value: str) -> None:
+    with pytest.raises(RuntimeError, match="BUNDLEGRAPH_PUBLIC_BASE_URL"):
+        production_settings({
+            "DATABASE_URL": "postgres://x",
+            "PAYPAL_CLIENT_ID": "c",
+            "PAYPAL_CLIENT_SECRET": "s",
+            "PAYPAL_WEBHOOK_ID": "WH-abc",
+            "BUNDLEGRAPH_SANDBOX_RECIPIENTS": "sandbox-a",
+            "BUNDLEGRAPH_PUBLIC_BASE_URL": value,
+        })

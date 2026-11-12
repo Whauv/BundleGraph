@@ -32,7 +32,7 @@ test('workflow orchestration tracks the actual failed operation without fake pro
   assert.match(storeSource, /failedOperation/);
   assert.match(storeSource, /selectProposal/);
   assert.doesNotMatch(storeSource, /await Promise\.resolve\(\)/);
-  assert.doesNotMatch(storeSource, /setPipelineStage\('complete'\).*finally/s);
+  assert.doesNotMatch(storeSource, /finally\s*\{[^}]*setPipelineStage\('complete'\)/s);
 });
 
 test('guided connector values are normalized before comparing or resubmitting model output', () => {
@@ -50,6 +50,16 @@ test('draft updates preserve the server version for compare-and-swap validation'
 test('approved authoritative plans can open tracking without inventing payment execution', () => {
   assert.match(storeSource, /Boolean\(approvalRecord \|\| executionRecord \|\| replanResult\)/);
   assert.match(planApprovalSource, /View track &amp; recover/);
+});
+
+test('authoritative PayPal flow uses server-bound allocation endpoints and validates its return', () => {
+  for (const route of ['/payments/browser/create-order', '/payments/browser/complete-order', '/payments/browser/cancel-order']) {
+    assert.match(clientSource, new RegExp(route.replaceAll('/', '\\/')));
+  }
+  assert.match(storeSource, /pendingPaymentOperation\(\) !== operationId/);
+  assert.match(storeSource, /pendingPaymentOperation\(\) \|\| `payop-\$\{crypto\.randomUUID\(\)\}`/);
+  assert.match(storeSource, /const key = `\$\{returnState\}:\$\{operationId\}`/);
+  assert.doesNotMatch(storeSource, /createBrowserOrder\([^)]*(?:amount|recipient)/);
 });
 
 test('recovery presentation does not promote proposal totals into settlement facts', () => {

@@ -50,7 +50,7 @@ def test_paypal_sandbox_orders_flow_uses_documented_endpoints_and_idempotency() 
     client = PayPalSandboxOrdersClient("client", "secret", transport=transport)
     amount = Money(amount_minor=100, currency="USD")
 
-    order = client.create_order(amount=amount, request_id="create-1")
+    order = client.create_order(amount=amount, request_id="create-1", return_url="https://bundle.example/?payment_return=approved", cancel_url="https://bundle.example/?payment_return=cancelled")
     authorization = client.authorize_order(order_id=order.order_id, request_id="authorize-1")
     capture = client.capture_authorization(authorization_id=authorization, amount=amount, request_id="capture-1")
     refund = client.refund_capture(capture_id=capture, amount=amount, request_id="refund-1")
@@ -59,6 +59,12 @@ def test_paypal_sandbox_orders_flow_uses_documented_endpoints_and_idempotency() 
     assert (order.order_id, authorization, capture, refund, verified) == ("ORDER-1", "AUTH-1", "CAP-1", "REF-1", True)
     assert all(url.startswith(PAYPAL_SANDBOX_BASE_URL) for _, url, *_ in transport.calls)
     assert [call[2].get("PayPal-Request-Id") for call in transport.calls[1:5]] == ["create-1", "authorize-1", "capture-1", "refund-1"]
+    create_body = transport.calls[1][3]
+    assert create_body["payment_source"]["paypal"]["experience_context"] == {
+        "return_url": "https://bundle.example/?payment_return=approved",
+        "cancel_url": "https://bundle.example/?payment_return=cancelled",
+        "user_action": "PAY_NOW",
+    }
 
 
 def test_replan_generation_requires_a_trigger_and_bounded_search() -> None:

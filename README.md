@@ -205,6 +205,13 @@ python -m bundlegraph_app.paypal_smoke complete ORDER_ID --amount-minor 100 --ac
 Printing an approval URL is not a passed end-to-end check. Only the successful
 `complete` result is evidence that the selected sandbox lifecycle ran.
 
+In the hosted production runtime, the browser exposes **Continue to PayPal
+Sandbox** only after the exact persisted plan version is approved and
+`/runtime-config` advertises payment support. The server creates the order from
+the stored merchant allocation, sends its configured HTTPS return/cancel URLs
+to PayPal, and records the resulting capture or cancellation in **Track &
+recover**. The browser never supplies the amount or recipient.
+
 ## Member 2 application layer
 
 `bundlegraph_app` is the authoritative application layer: durable plan IDs and versions, approval binding by plan-version fingerprint, persisted merchant allocations, idempotent PayPal sandbox adapter (authorize/capture/void/refund), reconciliation of submitted operations, webhook deduplication, and a FastAPI boundary wiring Member 1's handlers. It is strictly outside the `bundlegraph` intelligence package and lives in `src/bundlegraph_app/`.

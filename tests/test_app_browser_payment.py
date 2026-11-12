@@ -24,7 +24,7 @@ from bundlegraph_app.application import ApplicationService
 from bundlegraph_app.auth import TestingAuthenticationProvider
 from bundlegraph_app.paypal import FakeSandboxClient, PayPalAdapter
 from bundlegraph_app.paypal_browser import BrowserPaymentError, BrowserPaymentOrchestrator
-from bundlegraph_app.paypal_sandbox import PayPalSandboxOrdersClient, SandboxOrder
+from bundlegraph_app.paypal_sandbox import PayPalSandboxOrdersClient, PayPalSandboxProtocolError, SandboxOrder
 from bundlegraph_app.paypal_webhook import (
     DirectWebhookVerifier,
     PayPalDirectWebhookVerifier,
@@ -46,25 +46,37 @@ class _StubOrdersClient:
     """A minimal in-process stand-in that honors the PayPalSandboxOrdersClient interface used by the orchestrator."""
 
     def __init__(self) -> None:
-        self.create_calls: list[tuple[Money, str]] = []
+        self.create_calls: list[tuple[Money, str, str | None, str | None, str | None]] = []
         self.authorize_calls: list[tuple[str, str]] = []
         self.capture_calls: list[tuple[str, Money, str]] = []
         self.verify_results: list[bool] = []
         self.verify_calls: list[dict[str, Any]] = []
         self._next_order = 1
+        self.fail_create_once = False
+        self.fail_authorize_once = False
+        self.fail_capture_once = False
 
-    def create_order(self, *, amount: Money, request_id: str) -> SandboxOrder:
-        self.create_calls.append((amount, request_id))
+    def create_order(self, *, amount: Money, request_id: str, return_url: str | None = None, cancel_url: str | None = None, custom_id: str | None = None) -> SandboxOrder:
+        self.create_calls.append((amount, request_id, return_url, cancel_url, custom_id))
+        if self.fail_create_once:
+            self.fail_create_once = False
+            raise PayPalSandboxProtocolError("synthetic create outage")
         order_id = f"ORDER-{self._next_order:03d}"
         self._next_order += 1
         return SandboxOrder(order_id=order_id, approval_url=f"https://sandbox.paypal.com/checkoutnow?token={order_id}")
 
     def authorize_order(self, *, order_id: str, request_id: str) -> str:
         self.authorize_calls.append((order_id, request_id))
+        if self.fail_authorize_once:
+            self.fail_authorize_once = False
+            raise PayPalSandboxProtocolError("synthetic authorize outage")
         return f"AUTH-{order_id}"
 
     def capture_authorization(self, *, authorization_id: str, amount: Money, request_id: str) -> str:
         self.capture_calls.append((authorization_id, amount, request_id))
+        if self.fail_capture_once:
+            self.fail_capture_once = False
+            raise PayPalSandboxProtocolError("synthetic capture outage")
         return f"CAP-{authorization_id}"
 
     def verify_webhook(self, **kwargs: Any) -> bool:
@@ -155,13 +167,16 @@ def test_create_order_uses_persisted_amount_and_merchant() -> None:
     data = response.json()
     assert data["status"] == "awaiting_buyer_approval"
     assert data["approval_url"].startswith("https://sandbox.paypal.com/")
-    assert data["return_url"] == "https://example.test/payments/browser/return?operation_id=op-browser-1"
-    assert data["cancel_url"] == "https://example.test/payments/browser/cancel?operation_id=op-browser-1"
+    assert data["return_url"] == "https://example.test/?payment_return=approved&operation_id=op-browser-1"
+    assert data["cancel_url"] == "https://example.test/?payment_return=cancelled&operation_id=op-browser-1"
     assert data["amount"] == allocation["amount"]
     assert data["merchant_reference"] == allocation["merchant_reference"]
     assert len(orders_stub.create_calls) == 1
-    sent_amount, _ = orders_stub.create_calls[0]
+    sent_amount, _, return_url, cancel_url, custom_id = orders_stub.create_calls[0]
     assert sent_amount.amount_minor == allocation["amount"]["amount_minor"]
+    assert return_url == data["return_url"]
+    assert cancel_url == data["cancel_url"]
+    assert custom_id == "op-browser-1"
     stored = payments.get("op-browser-1")
     assert stored is not None
     assert stored.recipient_reference == allocation["merchant_reference"]
@@ -185,6 +200,35 @@ def test_browser_request_cannot_override_amount_or_recipient() -> None:
     assert response.status_code == 422
 
 
+def test_create_order_replay_returns_same_approval_url_without_provider_call() -> None:
+    client, orders_stub, _, _ = _client()
+    _, approval, head = _create_plan_and_approval(client)
+    body = {"approval_id": approval["approval_id"], "operation_id": "op-browser-replay", "merchant_allocation_id": head["merchant_allocations"][0]["allocation_id"]}
+
+    first = client.post("/payments/browser/create-order", json=body)
+    second = client.post("/payments/browser/create-order", json=body)
+
+    assert second.status_code == 200
+    assert second.json()["approval_url"] == first.json()["approval_url"]
+    assert len(orders_stub.create_calls) == 1
+
+
+def test_uncertain_create_order_retries_with_same_idempotency_key() -> None:
+    client, orders_stub, _, payments = _client()
+    _, approval, head = _create_plan_and_approval(client)
+    body = {"approval_id": approval["approval_id"], "operation_id": "op-browser-create-uncertain", "merchant_allocation_id": head["merchant_allocations"][0]["allocation_id"]}
+    orders_stub.fail_create_once = True
+
+    assert client.post("/payments/browser/create-order", json=body).status_code == 422
+    assert payments.get(body["operation_id"]).status is PaymentOperationStatus.SUBMITTED
+    retried = client.post("/payments/browser/create-order", json=body)
+
+    assert retried.status_code == 200
+    assert retried.json()["approval_url"].startswith("https://sandbox.paypal.com/")
+    assert payments.get(body["operation_id"]).failure_reason_code is None
+    assert orders_stub.create_calls[0][1] == orders_stub.create_calls[1][1]
+
+
 def test_complete_order_captures_persisted_amount_and_merchant() -> None:
     client, orders_stub, _, payments = _client()
     plan, approval, head = _create_plan_and_approval(client)
@@ -200,6 +244,8 @@ def test_complete_order_captures_persisted_amount_and_merchant() -> None:
     assert data["authorization_reference"].startswith("AUTH-")
     assert data["capture_reference"].startswith("CAP-AUTH-")
     assert data["amount"]["amount_minor"] == allocation["amount"]["amount_minor"]
+    assert data["plan_id"] == plan["plan_id"]
+    assert data["approval_id"] == approval["approval_id"]
     # Only one capture call occurred, with the persisted amount.
     assert len(orders_stub.capture_calls) == 1
     captured_authorization, captured_amount, _ = orders_stub.capture_calls[0]
@@ -207,6 +253,48 @@ def test_complete_order_captures_persisted_amount_and_merchant() -> None:
     assert captured_authorization.startswith("AUTH-")
     capture_op = payments.get(data["capture_operation_id"])
     assert capture_op is not None and capture_op.status is PaymentOperationStatus.SUCCEEDED
+
+
+def test_complete_order_replay_does_not_repeat_authorize_or_capture() -> None:
+    client, orders_stub, _, _ = _client()
+    _, approval, head = _create_plan_and_approval(client)
+    operation_id = "op-browser-complete-replay"
+    client.post("/payments/browser/create-order", json={"approval_id": approval["approval_id"], "operation_id": operation_id, "merchant_allocation_id": head["merchant_allocations"][0]["allocation_id"]})
+
+    first = client.post("/payments/browser/complete-order", json={"operation_id": operation_id})
+    second = client.post("/payments/browser/complete-order", json={"operation_id": operation_id})
+
+    assert second.status_code == 200
+    assert second.json()["capture_reference"] == first.json()["capture_reference"]
+    assert len(orders_stub.authorize_calls) == 1
+    assert len(orders_stub.capture_calls) == 1
+
+
+def test_uncertain_authorize_requires_reconciliation_without_retry() -> None:
+    client, orders_stub, _, payments = _client()
+    _, approval, head = _create_plan_and_approval(client)
+    operation_id = "op-browser-uncertain"
+    client.post("/payments/browser/create-order", json={"approval_id": approval["approval_id"], "operation_id": operation_id, "merchant_allocation_id": head["merchant_allocations"][0]["allocation_id"]})
+
+    orders_stub.fail_authorize_once = True
+    assert client.post("/payments/browser/complete-order", json={"operation_id": operation_id}).status_code == 422
+    assert payments.get(operation_id).status is PaymentOperationStatus.UNCERTAIN
+    assert client.post("/payments/browser/complete-order", json={"operation_id": operation_id}).status_code == 422
+    assert len(orders_stub.authorize_calls) == 1
+    assert orders_stub.capture_calls == []
+
+
+def test_uncertain_capture_requires_reconciliation_without_retry() -> None:
+    client, orders_stub, _, payments = _client()
+    _, approval, head = _create_plan_and_approval(client)
+    operation_id = "op-browser-capture-uncertain"
+    client.post("/payments/browser/create-order", json={"approval_id": approval["approval_id"], "operation_id": operation_id, "merchant_allocation_id": head["merchant_allocations"][0]["allocation_id"]})
+    orders_stub.fail_capture_once = True
+
+    assert client.post("/payments/browser/complete-order", json={"operation_id": operation_id}).status_code == 422
+    assert payments.get(f"{operation_id}-capture").status is PaymentOperationStatus.UNCERTAIN
+    assert client.post("/payments/browser/complete-order", json={"operation_id": operation_id}).status_code == 422
+    assert len(orders_stub.capture_calls) == 1
 
 
 def test_cancel_order_marks_failed_without_calling_paypal() -> None:
@@ -221,6 +309,7 @@ def test_cancel_order_marks_failed_without_calling_paypal() -> None:
     assert response.status_code == 200
     assert response.json()["status"] == PaymentOperationStatus.FAILED.value
     assert response.json()["failure_reason_code"] == "BUYER_CANCELLED"
+    assert response.json()["plan_id"] == plan["plan_id"]
     assert orders_stub.authorize_calls == []
     assert orders_stub.capture_calls == []
 

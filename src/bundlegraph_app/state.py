@@ -182,6 +182,8 @@ class PaymentOperation(BaseModel):
     merchant_allocation_id: str = Field(min_length=1)
     parent_operation_id: str | None = None
     provider_reference: str | None = None
+    provider_order_reference: str | None = None
+    provider_approval_url: str | None = None
     submitted_at: datetime | None = None
     settled_at: datetime | None = None
     last_webhook_event_id: str | None = None

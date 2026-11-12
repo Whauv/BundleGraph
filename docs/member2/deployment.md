@@ -73,7 +73,7 @@ Environment variables:
 | `PAYPAL_APPROVED_ORDER_ID` | opt-in smoke only | Buyer-approved sandbox order consumed by the live lifecycle smoke test. |
 | `BUNDLEGRAPH_RUN_PAYPAL_SMOKE` | opt-in smoke only | Must equal `1` before the sandbox test can make money-state calls. |
 | `BUNDLEGRAPH_FRONTEND_ORIGINS` | when frontend is cross-origin | Explicit comma-separated browser origins allowed to call the API. Wildcards and non-HTTP(S) origins are rejected. |
-| `BUNDLEGRAPH_PUBLIC_BASE_URL` | prod browser journey | Public HTTPS base URL the browser payment journey returns to for `return_url` and `cancel_url`. Omit it when the server is unreachable from the public internet. |
+| `BUNDLEGRAPH_PUBLIC_BASE_URL` | yes (prod) | Public HTTPS origin used for the PayPal return and cancel URLs. Production startup rejects missing, non-HTTPS, credentialed, or path-bearing values. |
 | `GROQ_API_KEY` / `GROQ_MODEL` | yes (prod) | Groq structured extraction credentials for the requirement interpreter. |
 
 ## Hosted (Render)
