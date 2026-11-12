@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const root = new URL('../', import.meta.url);
 const indexSource = await readFile(new URL('index.html', root), 'utf8');
+const viteConfigSource = await readFile(new URL('vite.config.ts', root), 'utf8');
 const packageJson = JSON.parse(await readFile(new URL('package.json', root), 'utf8'));
 const clientSource = await readFile(new URL('src/api/client.ts', root), 'utf8');
 const storeSource = await readFile(new URL('src/store/demoStore.tsx', root), 'utf8');
@@ -26,6 +27,12 @@ test('package scripts validate and build the canonical frontend', () => {
   assert.match(packageJson.scripts.check, /build/);
   assert.equal(packageJson.dependencies.react.startsWith('^19'), true);
   assert.equal(typeof packageJson.dependencies.motion, 'string');
+});
+
+test('authoritative Playwright server exposes the runtime contract before app startup', () => {
+  assert.match(viteConfigSource, /VITE_BUNDLEGRAPH_RUNTIME !== 'authoritative'/);
+  assert.match(viteConfigSource, /server\.middlewares\.use\('\/runtime-config'/);
+  assert.match(viteConfigSource, /authentication: null/);
 });
 
 test('workflow orchestration tracks the actual failed operation without fake progress', () => {
