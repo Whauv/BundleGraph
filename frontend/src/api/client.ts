@@ -156,11 +156,11 @@ function translateFixture<T>(action: () => Promise<T>): Promise<T> {
 
 export const api = {
   async getPresets(): Promise<PresetScenario[]> { return fixture.getPresets(); },
-  async interpretRequirements(message: string, requestReference = `req-${crypto.randomUUID()}`, signal?: AbortSignal): Promise<RequirementInterpretation> {
+  async interpretRequirements(message: string, requestReference = `req-${crypto.randomUUID()}`, expectedVersion?: number, signal?: AbortSignal): Promise<RequirementInterpretation> {
     if (frontendRuntime.mode === 'fixture') return translateFixture(() => fixture.interpret(message, requestReference));
-    return asInterpretation(await requestJson('/requirement-drafts/interpret', { method: 'POST', body: JSON.stringify({ message, request_reference: requestReference }), signal }));
+    return asInterpretation(await requestJson('/requirement-drafts/interpret', { method: 'POST', body: JSON.stringify({ message, request_reference: requestReference, expected_version: expectedVersion }), signal }));
   },
-  async saveGuidedDraft(params: { request_reference: string; use_case: string | null; participants: number | null; budget_minor: number | null; currency: string | null; laptop_connectors: string[]; monitoring: string | null; deadline?: string }, signal?: AbortSignal) {
+  async saveGuidedDraft(params: { request_reference: string; use_case: string | null; participants: number | null; budget_minor: number | null; currency: string | null; laptop_connectors: string[]; monitoring: string | null; deadline?: string; expected_version?: number }, signal?: AbortSignal) {
     if (frontendRuntime.mode === 'fixture') return translateFixture(() => fixture.saveGuided(params));
     return asGuided(await requestJson('/requirement-drafts/guided', { method: 'POST', body: JSON.stringify(params), signal }));
   },

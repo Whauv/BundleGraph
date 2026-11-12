@@ -43,6 +43,11 @@ function monitoringForApi(value: string): string {
   return ({ independent_headphones: 'independent', shared_headphones: 'shared', no_monitoring: 'none' } as Record<string, string>)[value] || value;
 }
 
+function canonicalConnector(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toLowerCase().replaceAll('_', '-').replace(/\s+/g, '-');
+  return ({ 'usb-c': 'usb-c', usbc: 'usb-c', 'usb-a': 'usb-a', usba: 'usb-a' } as Record<string, string | undefined>)[normalized || ''] || null;
+}
+
 function asFailure(error: unknown): ApiFailure {
   if (error && typeof error === 'object' && 'reason_code' in error) return error as ApiFailure;
   return { status: 0, reason_code: 'UNEXPECTED_CLIENT_ERROR', message: error instanceof Error ? error.message : String(error) };
@@ -165,17 +170,18 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const interpretPrompt = async () => {
     const token = beginOperation('interpret', 'resolving_requirements'); clearDownstream(true);
     try {
-      const result = await api.interpretRequirements(promptText, requestReference);
+      const result = await api.interpretRequirements(promptText, requestReference, draftVersion || undefined);
       if (!isCurrent(token)) return;
       const disagreements: string[] = [];
       if (result.draft.budget && result.draft.budget.amount_minor !== dollarsToMinorUnits(budgetDollars)) disagreements.push(`Extracted budget is $${(result.draft.budget.amount_minor / 100).toFixed(2)}; structured budget was $${budgetDollars.toFixed(2)}.`);
       if (result.draft.participants !== null && result.draft.participants !== participants) disagreements.push(`Extracted participant count is ${result.draft.participants}; structured count was ${participants}.`);
-      if (result.draft.laptop_connectors[0]?.connector && result.draft.laptop_connectors[0].connector !== laptopConnector) disagreements.push(`Extracted connector is ${result.draft.laptop_connectors[0].connector}; structured connector was ${laptopConnector}.`);
+      const extractedConnector = canonicalConnector(result.draft.laptop_connectors[0]?.connector);
+      if (extractedConnector && extractedConnector !== laptopConnector) disagreements.push(`Extracted connector is ${extractedConnector}; structured connector was ${laptopConnector}.`);
       setReviewDisagreements(disagreements); setInterpretation(result); setDraftVersion(result.version || 1);
       setUseCaseState(result.draft.use_case || '');
       if (result.draft.participants !== null) setParticipantsState(result.draft.participants);
       if (result.draft.budget) setBudgetDollarsState(result.draft.budget.amount_minor / 100);
-      if (result.draft.laptop_connectors[0]?.connector) setLaptopConnectorState(result.draft.laptop_connectors[0].connector);
+      if (extractedConnector) setLaptopConnectorState(extractedConnector);
       if (result.draft.listening_requirement) setListeningRequirementState(result.draft.listening_requirement);
       if (result.draft.deadline) setDeadlineDateState(result.draft.deadline.slice(0, 10));
       finishOperation(token); commitStep('review');
@@ -185,7 +191,7 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const guidedDraft = () => api.saveGuidedDraft({
     request_reference: requestReference, use_case: useCase || null, participants,
     budget_minor: dollarsToMinorUnits(budgetDollars), currency: dollarsToMinorUnits(budgetDollars) === null ? null : 'USD', laptop_connectors: [laptopConnector],
-    monitoring: monitoringForApi(listeningRequirement), deadline: deadlineDate ? new Date(`${deadlineDate}T12:00:00Z`).toISOString() : undefined,
+    monitoring: monitoringForApi(listeningRequirement), deadline: deadlineDate ? new Date(`${deadlineDate}T12:00:00Z`).toISOString() : undefined, expected_version: draftVersion || undefined,
   });
 
   const confirmRequirements = async () => {

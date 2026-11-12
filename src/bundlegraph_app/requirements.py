@@ -87,6 +87,16 @@ def new_draft_record(owner_subject: str, version: int, draft: DraftRequirements,
     return RequirementDraftRecord(owner_subject=owner_subject, version=version, draft=draft, clarification_questions=clarification_questions, created_at=created_at or timestamp, updated_at=timestamp)
 
 
+def normalize_laptop_connector(value: str) -> str | None:
+    """Normalize only the connector values offered by the guided form.
+
+    Model output is untrusted, so an unfamiliar value remains unknown rather
+    than being coerced into a compatible connector fact.
+    """
+    normalized = value.strip().casefold().replace("_", "-").replace(" ", "-")
+    return {"usb-c": "usb-c", "usbc": "usb-c", "usb-a": "usb-a", "usba": "usb-a"}.get(normalized)
+
+
 def build_guided_draft(*, request_reference: str, use_case: str | None, participants: int | None, budget_minor: int | None, currency: str | None, laptop_connectors: tuple[str, ...], monitoring: str | None, deadline: datetime | None = None) -> DraftRequirements:
     """Translate explicit guided answers for BundleGraph's fixed initial domain."""
     missing: list[str] = []
@@ -100,7 +110,11 @@ def build_guided_draft(*, request_reference: str, use_case: str | None, particip
         missing.append("supported participant topology")
     if budget_minor is None or not currency:
         missing.append("budget")
-    known_connectors = tuple(LaptopConnectorFact(connector=value) for value in laptop_connectors if value != "unknown")
+    known_connectors = tuple(
+        LaptopConnectorFact(connector=normalized)
+        for value in laptop_connectors
+        if (normalized := normalize_laptop_connector(value)) is not None
+    )
     if not known_connectors:
         missing.append("laptop connector")
     listening = {"independent": ListeningRequirement.INDEPENDENT_HEADPHONES, "shared": ListeningRequirement.SHARED_HEADPHONES, "none": ListeningRequirement.NO_MONITORING}.get(monitoring or "")

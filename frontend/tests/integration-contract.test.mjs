@@ -34,6 +34,18 @@ test('workflow orchestration tracks the actual failed operation without fake pro
   assert.doesNotMatch(storeSource, /setPipelineStage\('complete'\).*finally/s);
 });
 
+test('guided connector values are normalized before comparing or resubmitting model output', () => {
+  assert.match(storeSource, /function canonicalConnector/);
+  assert.match(storeSource, /'usb-c': 'usb-c'/);
+  assert.match(storeSource, /const extractedConnector = canonicalConnector/);
+});
+
+test('draft updates preserve the server version for compare-and-swap validation', () => {
+  assert.match(clientSource, /expected_version: expectedVersion/);
+  assert.match(storeSource, /api\.interpretRequirements\(promptText, requestReference, draftVersion \|\| undefined\)/);
+  assert.match(storeSource, /expected_version: draftVersion \|\| undefined/);
+});
+
 test('recovery presentation does not promote proposal totals into settlement facts', () => {
   assert.match(recoverySource, /Recorded amount/);
   assert.match(recoverySource, /Not recorded/);

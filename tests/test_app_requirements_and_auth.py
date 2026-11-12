@@ -26,6 +26,20 @@ def test_guided_answers_create_an_unconfirmed_complete_draft() -> None:
     assert not hasattr(draft, "confirmation_reference")
 
 
+def test_guided_answers_normalize_supported_connector_spellings() -> None:
+    draft = build_guided_draft(request_reference="req-connector", use_case="Two-person podcast", participants=2, budget_minor=90_000, currency="USD", laptop_connectors=("USB-C",), monitoring="independent")
+
+    assert tuple(item.connector for item in draft.laptop_connectors) == ("usb-c",)
+    assert draft.missing_information == ()
+
+
+def test_guided_answers_keep_unrecognized_connector_unknown() -> None:
+    draft = build_guided_draft(request_reference="req-unknown-connector", use_case="Two-person podcast", participants=2, budget_minor=90_000, currency="USD", laptop_connectors=("HDMI",), monitoring="independent")
+
+    assert draft.laptop_connectors == ()
+    assert draft.missing_information == ("laptop connector",)
+
+
 def test_guided_answers_preserve_unknowns_for_clarification() -> None:
     draft = build_guided_draft(request_reference="req-2", use_case=None, participants=None, budget_minor=None, currency=None, laptop_connectors=("unknown",), monitoring="unknown")
 
