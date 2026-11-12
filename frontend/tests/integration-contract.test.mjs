@@ -8,6 +8,7 @@ const packageJson = JSON.parse(await readFile(new URL('package.json', root), 'ut
 const clientSource = await readFile(new URL('src/api/client.ts', root), 'utf8');
 const storeSource = await readFile(new URL('src/store/demoStore.tsx', root), 'utf8');
 const recoverySource = await readFile(new URL('src/components/screens/ExecutionRecovery.tsx', root), 'utf8');
+const planApprovalSource = await readFile(new URL('src/components/screens/PlanApproval.tsx', root), 'utf8');
 const sessionSource = await readFile(new URL('src/auth/session.ts', root), 'utf8');
 const authGateSource = await readFile(new URL('src/components/auth/AuthGate.tsx', root), 'utf8');
 
@@ -44,6 +45,11 @@ test('draft updates preserve the server version for compare-and-swap validation'
   assert.match(clientSource, /expected_version: expectedVersion/);
   assert.match(storeSource, /api\.interpretRequirements\(promptText, requestReference, draftVersion \|\| undefined\)/);
   assert.match(storeSource, /expected_version: draftVersion \|\| undefined/);
+});
+
+test('approved authoritative plans can open tracking without inventing payment execution', () => {
+  assert.match(storeSource, /Boolean\(approvalRecord \|\| executionRecord \|\| replanResult\)/);
+  assert.match(planApprovalSource, /View track &amp; recover/);
 });
 
 test('recovery presentation does not promote proposal totals into settlement facts', () => {

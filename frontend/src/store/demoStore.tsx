@@ -97,8 +97,11 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (step === 'review') return Boolean(interpretation);
     if (step === 'comparison') return Boolean(confirmedRequirements && !['idle', 'loading', 'stale'].includes(searchResult.status));
     if (step === 'approval') return Boolean(authoritativePlan);
-    return Boolean(executionRecord || replanResult);
-  }, [authoritativePlan, confirmedRequirements, executionRecord, interpretation, replanResult, searchResult.status]);
+    // An approved plan can be inspected in Track & recover even before the
+    // backend returns an execution/replan record. Payment execution remains
+    // unavailable unless an explicit server-supported action is returned.
+    return Boolean(approvalRecord || executionRecord || replanResult);
+  }, [approvalRecord, authoritativePlan, confirmedRequirements, executionRecord, interpretation, replanResult, searchResult.status]);
 
   const commitStep = useCallback((step: ScreenStep, replace = false) => {
     setCurrentStep(step);
