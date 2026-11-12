@@ -1,18 +1,34 @@
 # BundleGraph submission package
 
 This file contains ready-to-paste submission copy and a judge runbook. Replace
-only the two marked URL placeholders after hosting the app and uploading the
-demo video. Do not add provider secrets to this file or the repository.
+the marked YouTube placeholder after uploading the demo video. Never commit
+provider secrets (API keys, client secrets). The dedicated demo login and
+PayPal Sandbox buyer are published in the README's "Demo login for judges"
+section and repeated in the Devpost "Testing instructions" field.
+
+Deadline: **Thursday Nov 12, 2026, 12:00 pm Pacific Time**. Judging runs
+Dec 1–15, 2026, and the hosted demo and judge login must keep working until then.
 
 ## Submission links
 
 - Public repository: https://github.com/Whauv/BundleGraph
-- Hosted demo: https://bundlegraph.onrender.com — labeled synthetic fixture mode
+- Hosted demo: https://bundlegraph.onrender.com. Production profile with Auth0
+  sign-in, PostgreSQL, Groq, and PayPal Sandbox. The first load can take ~30 s
+  while the free-tier host wakes up.
 - Public YouTube demo: `REQUIRED — ADD URL AFTER RECORDING`
 
 ## Tagline
 
-Evidence-aware AI planning for complete, compatible podcast equipment bundles.
+Agentic commerce with guardrails: AI plans a compatible podcast setup, and
+PayPal pays for exactly the plan you approved.
+
+## Who it's for
+
+First-time and small-team podcasters, educators, and community radio volunteers
+who know what they want to record but not which interface, cables, and
+headphone path make two microphones actually work together. They currently
+piece bundles together from forum threads and product listings, and they often
+discover a missing input or cable only after the order arrives.
 
 ## Short description
 
@@ -75,7 +91,10 @@ license so judges can reproduce the project without private credentials.
 - **Payments:** PayPal Sandbox Orders/Payments adapters use persisted plan amounts,
   provider idempotency keys, webhook-signature verification, and replay protection.
 - **Frontend:** React 19, TypeScript, and Vite provide the guided five-stage flow,
-  interactive evidence graph, comparison, approval, and recovery views.
+  an AG Grid equipment comparison table, an interactive React Flow evidence
+  graph, and approval and recovery views.
+- **Hosting and identity:** Docker image deployed on Render, with Auth0
+  Authorization Code + PKCE sign-in and RS256 token validation on the API.
 - **Quality:** pytest, offline evaluation, Playwright, frontend lint/type/build
   checks, Docker Compose smoke tests, and GitHub Actions.
 
@@ -85,14 +104,23 @@ license so judges can reproduce the project without private credentials.
 
 - PayPal Developer Platform — Sandbox OAuth, Orders, authorization/capture,
   refund/void support, approval URLs, idempotency, and webhook verification.
-- Groq API — optional live natural-language-to-structured-requirements extraction.
+- Groq API — natural-language-to-structured-requirements extraction, enabled on
+  the hosted deployment (`/readyz` reports `model_provider: true`).
+- **AG Grid** (sponsor tool) — `ag-grid-react` equipment comparison table in the
+  bundle comparison screen (`frontend/src/components/grid/BundleGrid.tsx`).
+- **Render** (sponsor tool) — hosts the production Docker deployment at
+  https://bundlegraph.onrender.com.
+- **Channel3** (sponsor tool) — `POST /v1/search` candidate discovery adapter,
+  configured on the hosted deployment (`/readyz` reports
+  `candidate_provider: true`). VERIFY a live discovery result before submitting
+  and show it in the video when claiming the Channel3 prize.
+- Auth0 — hosted sign-in (Authorization Code + PKCE).
 - Python 3.12+, FastAPI, Pydantic, and pytest.
-- React 19, TypeScript, Vite, Playwright, and Node.js.
+- React 19, TypeScript, Vite, React Flow, Playwright, and Node.js.
 - PostgreSQL, Docker Compose, and GitHub Actions.
 
 ### Implemented as optional adapters; do not claim live use unless separately run
 
-- Channel3 candidate discovery.
 - Elastic evidence retrieval.
 - KERNEL bounded browser research.
 - Astropods research workflow execution.
@@ -106,6 +134,82 @@ license so judges can reproduce the project without private credentials.
 4. Browser input cannot override a stored PayPal amount or recipient.
 5. Replanning creates a new proposal/version and never silently mutates the
    original plan or relaxes hard constraints.
+
+## Challenges we ran into
+
+- **Keeping the AI out of the trust boundary.** LLM extraction is useful but can
+  hallucinate specs. We let Groq draft requirements only, validate them with
+  Pydantic, and require explicit user confirmation before anything is planned.
+- **"Unknown" is not "compatible".** Product data is often missing or
+  conflicting. The engine had to carry unknown and conflicting evidence through
+  selection and surface it, not quietly default it to a pass or zero cost.
+- **Binding payment to an approval.** We had to make sure the browser can never
+  change the PayPal amount or recipient. That required plan-version
+  fingerprints, persisted merchant allocations, idempotency keys, and
+  verified, deduplicated webhooks.
+- **Replanning without silent changes.** When an item becomes unavailable, the
+  replacement must respect locked parts and hard constraints and must create a
+  new version that needs re-approval.
+
+## Accomplishments we're proud of
+
+- Zero invalid bundles classified as verified across the labeled benchmark.
+- A full request → confirm → compare → approve → PayPal Sandbox → recover
+  journey, persisted in PostgreSQL and reproducible with one Docker command.
+- CI runs unit tests, Playwright end-to-end tests, and a containerized
+  authoritative-workflow smoke test on every push.
+
+## What we learned
+
+Agentic commerce needs crisp boundaries. The model is good at understanding
+intent, deterministic code is good at deciding compatibility, and payment must
+be tied to an exact, human-approved plan version.
+
+## What's next
+
+- Real retailer catalogs through Channel3 discovery plus Elastic evidence
+  retrieval, with freshness tracking.
+- More domains with the same dependency structure: home studios, streaming
+  rigs, home-office setups, and small-business POS hardware.
+- PayPal multi-merchant checkout for bundles split across several sellers, and
+  Venmo for small creator teams.
+- Support for one- and three-plus-person setups (the verified domain is
+  currently two participants).
+
+## Built during the submission period
+
+The repository's first commit is dated 2026-10-22, after the submission period
+opened on 2026-10-01. All code was written during the hackathon.
+
+## Devpost testing instructions (template — paste into Devpost)
+
+```text
+HOSTED DEMO: https://bundlegraph.onrender.com
+(First load may take ~30 seconds while the free-tier host wakes up.)
+
+1. Click "Continue with Auth0" and sign in with the judge demo account:
+     Email:    <JUDGE_AUTH0_EMAIL>
+     Password: <JUDGE_AUTH0_PASSWORD>
+2. Click "Two-person podcast" to load the example request, then
+   "Review requirements".
+3. Review and confirm the extracted requirements, then compare bundles.
+   Click a component or edge in the graph to inspect evidence.
+4. Select a bundle, approve the exact plan version, and click
+   "Continue to PayPal Sandbox". Log in with the PayPal SANDBOX buyer:
+     Email:    <SANDBOX_BUYER_EMAIL>
+     Password: <SANDBOX_BUYER_PASSWORD>
+   (Sandbox only. No real money moves.)
+5. In "Track & recover", see the recorded payment status. When an execution
+   reports a failed or unavailable offer, click "Find replacement options" to
+   see the replacement proposal, deltas, and the new-approval requirement.
+
+RUN LOCALLY (no accounts needed):
+  git clone https://github.com/Whauv/BundleGraph.git
+  cd BundleGraph
+  docker compose -f compose.sandbox.yml up --build --wait
+  Open http://127.0.0.1:8080 and enter token: local-dev-token
+  (Uses a labeled synthetic catalog and simulated execution.)
+```
 
 ## Judge runbook
 
@@ -150,7 +254,13 @@ functional without the live smoke test.
 - [x] Confirm GitHub recognizes the root `LICENSE` as MIT.
 - [x] Merge the reviewed refactor work into the public default branch.
 - [x] Confirm the default-branch GitHub Actions workflow is green.
-- [x] Verify the advertised hosted fixture demo responds over public HTTPS.
+- [x] Verify the hosted demo responds over public HTTPS (`/readyz` ready on 2026-11-12).
+- [ ] Fill in the demo Auth0 and PayPal Sandbox buyer logins in the README and
+      Devpost testing instructions, and confirm they work in a private window.
+- [ ] Confirm the Render service, Auth0 tenant, Groq, Channel3, and PayPal
+      sandbox credentials will stay valid through Dec 15, 2026.
+- [ ] Verify a live Channel3 discovery result before claiming the Channel3 prize.
+- [ ] Select the AG Grid, Render, and Channel3 sponsor tools on the Devpost form.
 - [ ] Record a sub-three-minute working demo.
 - [ ] Upload the video publicly to YouTube and insert its URL above and in Devpost.
 - [ ] Paste the description and tools list from this file into Devpost.
@@ -174,10 +284,11 @@ Local checks executed on **2026-11-09**:
 - Docker Compose smoke: **not run locally** because Docker Desktop was not running.
 - Full GitHub Actions result after the latest webhook fix: **passed** on public
   `main` commit `1dbf428`.
-- Public hosted demo: `/`, `/healthz`, and `/runtime-config` returned HTTP 200 on
-  2026-11-09. The runtime reports `demo`; `/readyz` intentionally reports
-  `not_ready` because PostgreSQL, authentication, and PayPal are not enabled in
-  fixture mode. Use the Docker judge runbook for the authoritative backend flow.
+- Public hosted demo (re-checked **2026-11-12**): `/`, `/healthz`, and
+  `/runtime-config` returned HTTP 200. The runtime reports `production` with
+  Auth0 authentication, and `/readyz` reports `ready` with persistence,
+  authentication, catalog, candidate provider, model provider, PayPal, and
+  webhook verifier all `true`. A cold first load took ~22 s.
 
 ## Accuracy notes for judges
 

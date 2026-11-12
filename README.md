@@ -1,12 +1,50 @@
 # BundleGraph
 
-BundleGraph is an evidence-aware bundle planner for podcast equipment. Member 1 provides normalized catalog/evidence contracts, deterministic compatibility, bounded selection, and replanning. The `bundlegraph_app` boundary adds authoritative requirement confirmation, PostgreSQL persistence, ownership authorization, plans, approvals, and payment ports. The browser application can be served by the same FastAPI process.
+**Agentic commerce with human-in-the-loop guardrails: AI plans a complete, compatible podcast setup, and PayPal pays for exactly the plan the user approved.**
 
-Hackathon judges and contributors can use the ready-to-paste [submission package](SUBMISSION.md) and the [three-minute demo plan](docs/demo-video.md).
+First-time podcasters regularly buy a "$500 bundle" that turns out not to work:
+two microphones but one interface input, a missing XLR cable, no way to plug in
+a second pair of headphones. BundleGraph turns a plain-English request into a
+complete, compatibility-checked equipment bundle, explains *why* the parts work
+together, and binds the user's approval and PayPal Sandbox payment to the exact
+stored plan.
 
-Public demo: [bundlegraph.onrender.com](https://bundlegraph.onrender.com). The
-hosted site is explicitly labeled synthetic fixture mode; use the Docker Compose
-judge runbook below for the PostgreSQL-backed authoritative workflow.
+- **AI (Groq)** extracts structured requirements from free text, but the model
+  never confirms requirements or approves payment.
+- **Deterministic compatibility engine** checks inputs, phantom power, cables,
+  monitoring, laptop ports, budget, and evidence. Unknown is never treated as compatible.
+- **PayPal Sandbox** order amount and recipient are derived server-side from the
+  approved plan version, with idempotency and verified webhooks.
+- **Recovery:** when an item becomes unavailable, it replans around locked parts
+  and requires new approval.
+
+| Link | |
+| --- | --- |
+| Hosted demo | [bundlegraph.onrender.com](https://bundlegraph.onrender.com). Production profile with Auth0 sign-in, PostgreSQL, Groq, and PayPal Sandbox. The first load can take ~30 s while the free-tier host wakes up. Sign in with the [demo account below](#demo-login-for-judges). |
+| Run it yourself | `docker compose -f compose.sandbox.yml up --build --wait`, then open `http://127.0.0.1:8080` and use token `local-dev-token` ([details](#durable-same-origin-application)) |
+| Submission package | [SUBMISSION.md](SUBMISSION.md) · [demo plan](docs/demo-video.md) · [architecture diagram](docs/architecture/bundlegraph-repository.html) |
+
+### Demo login for judges
+
+These accounts exist only for the hackathon demo. PayPal runs in **Sandbox**,
+so no real money moves.
+
+| Step | Account | Username | Password |
+| --- | --- | --- | --- |
+| 1. Click **Continue with Auth0** | BundleGraph demo user (Auth0) | `<JUDGE_AUTH0_EMAIL>` | `<JUDGE_AUTH0_PASSWORD>` |
+| 2. Click **Continue to PayPal Sandbox** after approving a plan | PayPal Sandbox personal buyer | `<SANDBOX_BUYER_EMAIL>` | `<SANDBOX_BUYER_PASSWORD>` |
+
+Walkthrough: load the **Two-person podcast** example → **Review requirements** →
+**Confirm requirements** → compare bundles and click graph nodes or edges to
+inspect evidence → **Approve plan** → **Continue to PayPal Sandbox** → see the
+recorded payment status in **Track & recover**.
+
+**Repository layout:** `src/bundlegraph` is the planning engine (contracts,
+compatibility, selection, replanning). `src/bundlegraph_app` is the application
+backend (confirmation, PostgreSQL persistence, ownership, plans, approvals,
+PayPal). `frontend/` is the React app, served by the same FastAPI process.
+Internal docs are grouped by owner: `docs/member1` covers the planning engine,
+`docs/member2` the backend, and `docs/member3` the frontend.
 
 The bundled catalog is synthetic fixture data for offline development; it is not a live retailer feed and must never be presented as one.
 
@@ -59,7 +97,7 @@ python -m bundlegraph.demo
 python -m bundlegraph.evaluation
 ```
 
-See [the measured offline results](docs/member1/evaluation-results.md), [security review](docs/member1/security-review.md), and [Phase 9 handoff](docs/member1/phase9-handoff.md). `.env.example` contains only empty server-side configuration placeholders. The Channel3 live smoke test is explicitly opt-in and requires Member 2's server-side deployment configuration; it is skipped during normal tests.
+See [the measured offline results](docs/member1/evaluation-results.md), [security review](docs/member1/security-review.md), and [Phase 9 handoff](docs/member1/phase9-handoff.md). `.env.example` contains only empty server-side configuration placeholders. The Channel3 live smoke test is explicitly opt-in and requires the backend's server-side deployment configuration; it is skipped during normal tests.
 
 ## Optional live smoke test
 
@@ -81,17 +119,18 @@ The smoke test performs one bounded Channel3 discovery request. It does not exec
 
 The interactive [repository architecture diagram](docs/architecture/bundlegraph-repository.html) follows the full browser-to-API-to-planner-to-persistence journey and marks optional or blocked provider paths. Its versioned [Archify source](docs/architecture/bundlegraph-repository.architecture.json) is included for future updates.
 
-The narrower [Member 1 intelligence-boundary diagram](docs/architecture/member1-intelligence-boundary.html) remains available for the deterministic planning path, optional evidence adapters, and Member 2 ownership boundary.
+The narrower [planning-engine boundary diagram](docs/architecture/member1-intelligence-boundary.html) remains available for the deterministic planning path, optional evidence adapters, and backend ownership boundary.
 
 ## Package boundary
 
 `bundlegraph.models` contains the shared contracts. `bundlegraph.catalog` contains the explicitly labeled offline fixture catalog. `bundlegraph.compatibility_graph` evaluates deterministic compatibility, `bundlegraph.selection` performs bounded exact search, and `bundlegraph.interpretation` provides injectable requirement extraction. A Groq adapter is available when `GROQ_API_KEY` and a currently supported `GROQ_MODEL` are configured server-side; its JSON response is still validated by the same Pydantic schema and never confirms requirements.
 
-## Member 3 frontend
+## Frontend
 
 The repository has one [React and TypeScript frontend](frontend/README.md) with
 the five-screen journey: request builder, requirements review, bundle comparison
-with evidence and graph, plan approval, and execution/recovery. It starts in
+with an AG Grid equipment table and React Flow dependency graph, plan approval,
+and execution/recovery. The local dev server starts in
 explicit synthetic fixture mode and makes no provider or payment call.
 
 ```powershell
@@ -100,7 +139,7 @@ npm --prefix frontend run dev
 ```
 
 Open `http://127.0.0.1:5173`. Fixture mode is explicit. Setting
-`VITE_BUNDLEGRAPH_RUNTIME=authoritative` connects the browser to Member 2's
+`VITE_BUNDLEGRAPH_RUNTIME=authoritative` connects the browser to the backend's
 authenticated draft, confirmation, plan, evidence, approval, and replan routes;
 configured API failures are shown and never replaced by fixture success.
 
@@ -118,7 +157,7 @@ configured API failures are shown and never replaced by fixture success.
 
 ## Dependency-aware re-planning
 
-`bundlegraph.replanning` turns a Member 2-supplied failed component into deterministic, non-authoritative replacement proposals. It reuses the bounded solver, preserves locked components and confirmed constraints, emits structured deltas and dependency subgraphs, and always marks material recovery proposals as requiring new approval. See [re-planning handoff](docs/member1/dependency-aware-replanning.md).
+`bundlegraph.replanning` turns a backend-supplied failed component into deterministic, non-authoritative replacement proposals. It reuses the bounded solver, preserves locked components and confirmed constraints, emits structured deltas and dependency subgraphs, and always marks material recovery proposals as requiring new approval. See [re-planning handoff](docs/member1/dependency-aware-replanning.md).
 
 ## Durable same-origin application
 
@@ -180,7 +219,7 @@ and requires new approval. `POST /plans` also accepts an optional owner-scoped
 `BUNDLEGRAPH_MODE=production` fails closed without its documented durable
 dependencies and authentication provider. `/healthz` is liveness; `/readyz`
 reports persistence, authentication, active catalog, PayPal, and webhook
-readiness. See [Member 2 deployment](docs/member2/deployment.md).
+readiness. See [backend deployment](docs/member2/deployment.md).
 
 The deployable Docker image sets `BUNDLEGRAPH_MODE=production` by default so a
 host cannot silently serve the demo runtime when its environment configuration
@@ -212,8 +251,8 @@ the stored merchant allocation, sends its configured HTTPS return/cancel URLs
 to PayPal, and records the resulting capture or cancellation in **Track &
 recover**. The browser never supplies the amount or recipient.
 
-## Member 2 application layer
+## Application layer
 
-`bundlegraph_app` is the authoritative application layer: durable plan IDs and versions, approval binding by plan-version fingerprint, persisted merchant allocations, idempotent PayPal sandbox adapter (authorize/capture/void/refund), reconciliation of submitted operations, webhook deduplication, and a FastAPI boundary wiring Member 1's handlers. It is strictly outside the `bundlegraph` intelligence package and lives in `src/bundlegraph_app/`.
+`bundlegraph_app` is the authoritative application layer: durable plan IDs and versions, approval binding by plan-version fingerprint, persisted merchant allocations, idempotent PayPal sandbox adapter (authorize/capture/void/refund), reconciliation of submitted operations, webhook deduplication, and a FastAPI boundary wiring the planning engine's handlers. It is strictly outside the `bundlegraph` intelligence package and lives in `src/bundlegraph_app/`.
 
-See [Member 2 overview](docs/member2/README.md), [state machine](docs/member2/state-machine.md), [PayPal integration](docs/member2/paypal-integration.md), and [deployment](docs/member2/deployment.md).
+See [backend overview](docs/member2/README.md), [state machine](docs/member2/state-machine.md), [PayPal integration](docs/member2/paypal-integration.md), and [deployment](docs/member2/deployment.md).
