@@ -182,6 +182,11 @@ dependencies and authentication provider. `/healthz` is liveness; `/readyz`
 reports persistence, authentication, active catalog, PayPal, and webhook
 readiness. See [Member 2 deployment](docs/member2/deployment.md).
 
+The deployable Docker image sets `BUNDLEGRAPH_MODE=production` by default so a
+host cannot silently serve the demo runtime when its environment configuration
+is missing. Local Python execution still defaults to `demo`, and
+`compose.sandbox.yml` explicitly selects `application`.
+
 ## PayPal sandbox validation
 
 The opt-in validator uses PayPal's documented OAuth, Orders v2, Payments v2,

@@ -30,6 +30,10 @@ browser reads `/runtime-config`; a `demo` server response safely selects the
 labeled fixture adapter. Production remains fail-closed when authentication is
 missing or incomplete.
 
+The Docker runtime stage defaults `BUNDLEGRAPH_MODE` to `production`. Hosts can
+explicitly override this value, but an omitted host variable cannot silently
+fall back to `demo`; missing production dependencies stop startup instead.
+
 ## Local
 
 ```powershell
