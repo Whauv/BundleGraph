@@ -67,7 +67,7 @@ def build_demo_app() -> "FastAPI":  # noqa: F821 -- forward reference for lazy F
     ownership = InMemoryResourceOwnershipRepository()
     plans, approvals, payments, webhooks, evidence_reader, mutations = new_in_memory_application_repositories(ownership)
     sandbox_recipients = frozenset(
-        os.getenv("BUNDLEGRAPH_SANDBOX_RECIPIENTS", "merchant-reference-demo").split(",")
+        os.getenv("BUNDLEGRAPH_SANDBOX_RECIPIENTS", "synthetic-merchant").split(",")
     )
     adapter = PayPalAdapter(FakeSandboxClient(), sandbox_recipients)
     service = ApplicationService(
