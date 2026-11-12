@@ -31,8 +31,8 @@ so no real money moves.
 
 | Step | Account | Username | Password |
 | --- | --- | --- | --- |
-| 1. Click **Continue with Auth0** | BundleGraph demo user (Auth0) | `<JUDGE_AUTH0_EMAIL>` | `<JUDGE_AUTH0_PASSWORD>` |
-| 2. Click **Continue to PayPal Sandbox** after approving a plan | PayPal Sandbox personal buyer | `<SANDBOX_BUYER_EMAIL>` | `<SANDBOX_BUYER_PASSWORD>` |
+| 1. Click **Continue with Auth0** | BundleGraph demo user (Auth0) | `pranav@gmail.com` | `Pranav@27122002` |
+| 2. Click **Continue to PayPal Sandbox** after approving a plan | PayPal Sandbox personal buyer | `sb-gmmbu53637092@personal.example.com` | `rX]3rX-g` |
 
 Walkthrough: load the **Two-person podcast** example → **Review requirements** →
 **Confirm requirements** → compare bundles and click graph nodes or edges to
